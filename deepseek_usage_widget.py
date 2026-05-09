@@ -49,6 +49,7 @@ CONFIG_DIR = Path.home() / ".deepseek_widget"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 DAILY_FILE = CONFIG_DIR / "daily.json"
 CSV_CACHE_DIR = CONFIG_DIR / "csv_cache"
+LOGO_FILE = Path(__file__).with_name("logo.png")
 
 # ── 默认配置 ────────────────────────────────────────────────
 DEFAULT_CONFIG = {
@@ -70,39 +71,39 @@ DEFAULT_CONFIG = {
 
 # ── UI 颜色主题（深色主题）──────────────────────────────────
 THEME = {
-    "bg":       "#36393d",
-    "panel":    "#2f3236",
-    "shell":    "#24272a",
-    "panel_edge": "#4a4e53",
-    "card":     "#101113",
-    "card_edge": "#30343a",
-    "surface0": "#1e2124",
-    "surface1": "#2a2d31",
-    "fg":       "#f2f4f7",
-    "muted":    "#b6bcc4",
-    "dim":      "#8b9199",
-    "accent":   "#7ea5d6",
-    "accent_2": "#7ea5d6",
-    "green":    "#8fb49c",
-    "yellow":   "#d4b171",
-    "red":      "#d07f86",
-    "bar_bg":   "#25282d",
-    "bar_in":   "#6f8fb3",
-    "bar_out":  "#8aa498",
-    "bar_cache": "#8c84a8",
-    "grid":     "#2d3136",
-    "shadow":   "#121518",
-    "highlight": "#c8d3df",
-    "mono_bar": "#8c98a6",
+    "bg":       "#99a3b2",
+    "panel":    "#23272d",
+    "shell":    "#c5ccd6",
+    "panel_edge": "#eef2f7",
+    "card":     "#15181d",
+    "card_edge": "#323840",
+    "surface0": "#20252c",
+    "surface1": "#2b313a",
+    "fg":       "#f5f7fb",
+    "muted":    "#c4ccd8",
+    "dim":      "#96a1af",
+    "accent":   "#82a0ff",
+    "accent_2": "#9c8cff",
+    "green":    "#63d29c",
+    "yellow":   "#ffbf5f",
+    "red":      "#ff8b81",
+    "bar_bg":   "#252b33",
+    "bar_in":   "#7ea6ff",
+    "bar_out":  "#7ad0ff",
+    "bar_cache": "#c09aff",
+    "grid":     "#313744",
+    "shadow":   "#8d97a5",
+    "highlight": "#dbe5ff",
+    "mono_bar": "#82a0ff",
 }
 
 MODEL_META = {
-    "deepseek-v4-flash": {"label": "V4 Flash", "accent": "#6ba8ff", "badge": "高吞吐"},
-    "deepseek-v4-pro": {"label": "V4 Pro", "accent": "#b27dff", "badge": "高质量"},
-    "deepseek-chat": {"label": "DeepSeek Chat", "accent": "#6ba8ff", "badge": "通用"},
-    "deepseek-reasoner": {"label": "Reasoner", "accent": "#ffb84c", "badge": "推理"},
-    "deepseek-v3": {"label": "V3", "accent": "#6ba8ff", "badge": "标准"},
-    "deepseek-r1": {"label": "R1", "accent": "#ff8f66", "badge": "推理"},
+    "deepseek-v4-flash": {"label": "V4 Flash", "accent": "#8babff", "badge": "高吞吐"},
+    "deepseek-v4-pro": {"label": "V4 Pro", "accent": "#c09aff", "badge": "高质量"},
+    "deepseek-chat": {"label": "DeepSeek Chat", "accent": "#8babff", "badge": "通用"},
+    "deepseek-reasoner": {"label": "Reasoner", "accent": "#7ad0ff", "badge": "推理"},
+    "deepseek-v3": {"label": "V3", "accent": "#8babff", "badge": "标准"},
+    "deepseek-r1": {"label": "R1", "accent": "#ffbf8a", "badge": "推理"},
 }
 
 # ── 字体 ────────────────────────────────────────────────────
@@ -711,6 +712,8 @@ class DeepSeekWidget(tk.Tk):
         self._prev_total_tokens = 0
         self._prev_refresh_time = None
         self._current_tpm = 0
+        self._tpm_samples = []
+        self._brand_logo = self._load_brand_logo()
 
         # 窗口
         self.overrideredirect(True)
@@ -741,7 +744,7 @@ class DeepSeekWidget(tk.Tk):
         sh = self.winfo_screenheight()
         ww = 760
         wh = min(780, sh - 90)
-        wh = max(680, wh)
+        wh = max(736, wh)
         self.geometry(f"{ww}x{wh}+{sw - ww - 20}+{sh - wh - 70}")
 
     def _fit_window_to_content(self):
@@ -750,13 +753,22 @@ class DeepSeekWidget(tk.Tk):
         self.update_idletasks()
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
+        current_width = self.winfo_width()
+        current_height = self.winfo_height()
         current_x = self.winfo_x()
         current_y = self.winfo_y()
         required_height = max(self.left_panel.winfo_reqheight(), self.right_panel.winfo_reqheight()) + 32
-        target_height = max(680, min(sh - 70, required_height))
-        width = max(760, self.winfo_width())
+        target_height = max(680, current_height, min(sh - 70, required_height))
+        width = max(760, current_width)
+        if target_height <= current_height + 16 and abs(width - current_width) < 2:
+            return
+        if abs(target_height - current_height) < 2 and abs(width - current_width) < 2:
+            return
         x = min(current_x if current_x > 0 else sw - width - 20, sw - width - 20)
-        y = min(current_y if current_y > 0 else sh - target_height - 70, sh - target_height - 70)
+        if current_y > 0:
+            y = min(current_y - max(0, target_height - current_height), sh - target_height - 70)
+        else:
+            y = sh - target_height - 70
         self.geometry(f"{width}x{target_height}+{x}+{max(10, y)}")
 
     # ── UI 构建 ───────────────────────────────────────────
@@ -779,10 +791,14 @@ class DeepSeekWidget(tk.Tk):
         header.pack(fill="x")
         brand = tk.Frame(header, bg=THEME["shell"])
         brand.pack(side="left")
-        logo = tk.Label(brand, text="◈",
-                        bg=THEME["surface0"], fg=THEME["accent_2"],
-                        font=_font(11, bold=True), width=2)
-        logo.pack(side="left", padx=(0, 8))
+        if self._brand_logo is not None:
+            logo = tk.Label(brand, image=self._brand_logo,
+                            bg=THEME["shell"], bd=0)
+        else:
+            logo = tk.Label(brand, text="◈",
+                            bg=THEME["surface0"], fg=THEME["accent_2"],
+                            font=_font(11, bold=True), width=2)
+        logo.pack(side="left", padx=(0, 10))
         title_box = tk.Frame(brand, bg=THEME["shell"])
         title_box.pack(side="left")
         tk.Label(title_box, text="DeepSeek Monitor",
@@ -858,7 +874,7 @@ class DeepSeekWidget(tk.Tk):
         toolbar = tk.Frame(self.right_panel, bg=THEME["panel"])
         toolbar.pack(fill="x", padx=14, pady=(12, 4))
         tk.Label(toolbar, text="运行概览",
-                 bg=THEME["panel"], fg=THEME["shell"],
+                 bg=THEME["panel"], fg=THEME["fg"],
                  font=_font(11, bold=True)).pack(side="left")
         tk.Label(toolbar, text="近 7 日",
                  bg=THEME["panel"], fg=THEME["dim"],
@@ -890,24 +906,22 @@ class DeepSeekWidget(tk.Tk):
                                        font=_font(9))
         self.lbl_chart_peak.pack(side="right", anchor="ne")
 
-        self.right_chart = tk.Canvas(chart_card.body, bg=THEME["card"], height=110,
+        self.right_chart = tk.Canvas(chart_card.body, bg=THEME["card"], height=182,
                                      highlightthickness=0, bd=0)
-        self.right_chart.pack(fill="both", expand=True, padx=12, pady=(8, 4))
-
-        self.history_table = tk.Frame(chart_card.body, bg=THEME["card"])
-        self.history_table.pack(fill="x", padx=12, pady=(2, 2))
-        self._build_history_table()
+        self.right_chart.pack(fill="both", expand=True, padx=12, pady=(10, 10))
 
         footer = tk.Frame(self.right_panel, bg=THEME["panel"])
         footer.pack(fill="x", padx=14, pady=(0, 10))
-        self.lbl_tpm = tk.Label(footer, text="--",
-                                bg=THEME["panel"], fg=THEME["fg"],
-                                font=_font(11, bold=True))
-        self.lbl_tpm.pack(side="left")
+        footer_top = tk.Frame(footer, bg=THEME["panel"])
+        footer_top.pack(fill="x")
+        self.lbl_tpm = tk.Label(footer_top, text="--",
+                    bg=THEME["panel"], fg=THEME["fg"],
+                    font=_font(11, bold=True), anchor="w")
+        self.lbl_tpm.pack(side="left", fill="x", expand=True)
         self.lbl_status = tk.Label(footer, text="等待首次刷新...",
-                                   bg=THEME["panel"], fg=THEME["dim"],
-                                   font=_font(8))
-        self.lbl_status.pack(side="right")
+                       bg=THEME["panel"], fg=THEME["dim"],
+                       font=_font(8), anchor="w", justify="left")
+        self.lbl_status.pack(fill="x", pady=(4, 0))
 
     def _panel_shell(self, parent):
         outer = tk.Frame(parent, bg=THEME["shadow"], padx=2, pady=2)
@@ -1006,7 +1020,7 @@ class DeepSeekWidget(tk.Tk):
             dot.pack(side="left")
             self._draw_rounded_bar(dot, 1, 1, 11, 11, color, radius=4)
             tk.Label(chip, text=label,
-                     bg=THEME["panel"], fg=THEME["shell"],
+                     bg=THEME["panel"], fg=THEME["muted"],
                      font=_font(8)).pack(side="left", padx=(4, 0))
 
     def _build_history_table(self):
@@ -1101,10 +1115,21 @@ class DeepSeekWidget(tk.Tk):
         self._ctx_menu.add_command(label="退出", command=self._on_close)
 
     def _context_menu(self, event):
+        if self._closing or not hasattr(self, "_ctx_menu"):
+            return
         try:
+            if not self.winfo_exists() or not self._ctx_menu.winfo_exists():
+                return
             self._ctx_menu.tk_popup(event.x_root, event.y_root)
+        except tk.TclError:
+            if not self._closing:
+                logger.debug("context menu dismissed during shutdown", exc_info=True)
         finally:
-            self._ctx_menu.grab_release()
+            try:
+                if self._ctx_menu.winfo_exists():
+                    self._ctx_menu.grab_release()
+            except tk.TclError:
+                pass
 
     # ── 数据刷新 ──────────────────────────────────────────
     def _schedule_refresh(self):
@@ -1207,17 +1232,7 @@ class DeepSeekWidget(tk.Tk):
 
                 now = datetime.now()
                 current_total = usage_data["total_tokens"] if usage_data else 0
-                tpm = 0
-                if self._prev_refresh_time is not None:
-                    delta_tokens = current_total - self._prev_total_tokens
-                    delta_secs = max(1, (now - self._prev_refresh_time).total_seconds())
-                    tpm = max(0, int((delta_tokens / delta_secs) * 60))
-                elif current_total > 0:
-                    refresh_secs = max(1, int(self.config.get("refresh_interval", 60)))
-                    tpm = max(0, int((current_total / refresh_secs) * 60))
-                self._prev_total_tokens = current_total
-                self._prev_refresh_time = now
-                snapshot["tpm"] = tpm
+                snapshot["tpm"] = self._update_tpm_state(current_total, now)
 
             if not self._closing:
                 self.after(0, lambda s=snapshot: self._apply_snapshot(s))
@@ -1339,7 +1354,6 @@ class DeepSeekWidget(tk.Tk):
         self._render_model_cards()
         self._draw_history_chart(self.left_chart, recent_history, "cost")
         self._draw_history_chart(self.right_chart, recent_history, "tokens")
-        self._render_history_table(recent_history)
         self.lbl_month_tokens.config(text=f"合计 {self._format_axis_value(self.month_tokens)}")
         if recent_history:
             start = recent_history[0]["date"]
@@ -1365,8 +1379,11 @@ class DeepSeekWidget(tk.Tk):
             parts.append(self.usage_error)
         elif not has_usage and self.balance_data:
             parts.append("暂无用量数据")
-        self.lbl_status.config(text="  ".join(parts),
-                               fg=THEME["red"] if self.usage_error else THEME["dim"])
+        status_text = "  ".join(parts)
+        wrap_width = max(180, self.right_panel.winfo_width() - 28) if self.right_panel.winfo_width() > 1 else 220
+        self.lbl_status.config(text=status_text,
+                       fg=THEME["red"] if self.usage_error else THEME["dim"],
+                       wraplength=wrap_width)
         self.after_idle(self._fit_window_to_content)
 
     def _render_model_cards(self):
@@ -1489,6 +1506,39 @@ class DeepSeekWidget(tk.Tk):
             self._draw_rounded_bar(canvas, 2, 2, min(fill_width - 2, 2 + highlight_width), height - 2,
                                    THEME["highlight"], radius=3, stipple="gray50")
 
+    def _update_tpm_state(self, current_total, now):
+        instant_tpm = None
+        if self._prev_refresh_time is not None:
+            delta_tokens = max(0, current_total - self._prev_total_tokens)
+            delta_secs = max(1, (now - self._prev_refresh_time).total_seconds())
+            if delta_tokens > 0:
+                instant_tpm = int((delta_tokens / delta_secs) * 60)
+        elif current_total > 0:
+            refresh_secs = max(1, int(self.config.get("refresh_interval", 60)))
+            instant_tpm = int((current_total / refresh_secs) * 60)
+
+        self._prev_total_tokens = current_total
+        self._prev_refresh_time = now
+
+        if instant_tpm and instant_tpm > 0:
+            self._tpm_samples.append(instant_tpm)
+            self._tpm_samples = self._tpm_samples[-6:]
+
+        if self._tpm_samples:
+            weights = list(range(1, len(self._tpm_samples) + 1))
+            weighted_avg = sum(sample * weight for sample, weight in zip(self._tpm_samples, weights)) / sum(weights)
+            if self._current_tpm > 0:
+                if instant_tpm and instant_tpm > 0:
+                    self._current_tpm = int((self._current_tpm * 0.45) + (weighted_avg * 0.55))
+                else:
+                    self._current_tpm = int((self._current_tpm * 0.92) + (weighted_avg * 0.08))
+            else:
+                self._current_tpm = int(weighted_avg)
+        elif instant_tpm and instant_tpm > 0:
+            self._current_tpm = instant_tpm
+
+        return max(0, int(self._current_tpm))
+
     def _draw_history_chart(self, canvas, history, metric):
         canvas.delete("all")
         width = max(canvas.winfo_width(), int(canvas.cget("width") or 0), 260)
@@ -1513,7 +1563,7 @@ class DeepSeekWidget(tk.Tk):
         computed_bar_w = int((usable_w - computed_gap * (count - 1)) / max(count, 1)) if history else 18
         bar_w = max(14, min(34, computed_bar_w))
         gap = computed_gap
-        accent = THEME["accent"] if metric == "tokens" else THEME["mono_bar"]
+        accent = THEME["mono_bar"]
 
         for step in range(4):
             y = top_pad + int((usable_h / 3) * step)
@@ -1528,10 +1578,6 @@ class DeepSeekWidget(tk.Tk):
             y0 = y1 - bar_h
             self._draw_rounded_bar(canvas, x0, top_pad + 8, x1, y1, THEME["bar_bg"], radius=7)
             self._draw_rounded_bar(canvas, x0, y0, x1, y1, accent, radius=7)
-            highlight_w = max(2, int(bar_w * 0.18))
-            if bar_h > 6 and metric == "tokens":
-                self._draw_rounded_bar(canvas, x0 + 2, y0 + 2, min(x1 - 2, x0 + 2 + highlight_w), y1 - 2,
-                                       THEME["highlight"], radius=4, stipple="gray50")
             value_y = max(top_pad - 2, y0 - 10)
             date_y = min(height - 8, y1 + 12)
             canvas.create_text((x0 + x1) / 2, date_y,
@@ -1543,6 +1589,19 @@ class DeepSeekWidget(tk.Tk):
 
         canvas.create_line(left_pad, top_pad + usable_h, width - right_pad, top_pad + usable_h,
                            fill=THEME["surface1"], width=2)
+
+    def _load_brand_logo(self):
+        if not LOGO_FILE.exists():
+            return None
+        try:
+            source = tk.PhotoImage(file=str(LOGO_FILE))
+            crop_width = min(source.width(), max(source.height(), 180))
+            icon = tk.PhotoImage()
+            icon.tk.call(str(icon), "copy", str(source), "-from", 0, 0, crop_width, source.height())
+            scale = max(1, round(source.height() / 24))
+            return icon.subsample(scale, scale)
+        except tk.TclError:
+            return None
 
     def _draw_rounded_bar(self, canvas, x0, y0, x1, y1, color, radius=6, stipple=None):
         width = max(0, x1 - x0)
@@ -1628,9 +1687,21 @@ class DeepSeekWidget(tk.Tk):
         if self._closing:
             return
         self._closing = True
+        if hasattr(self, "_ctx_menu"):
+            try:
+                if self._ctx_menu.winfo_exists():
+                    self._ctx_menu.unpost()
+                    self._ctx_menu.grab_release()
+            except tk.TclError:
+                pass
         if self._refresh_job_id:
             self.after_cancel(self._refresh_job_id)
             self._refresh_job_id = None
+        if self._settings_window is not None and self._settings_window.winfo_exists():
+            try:
+                self._settings_window.destroy()
+            except tk.TclError:
+                pass
         self.withdraw()
         self.after_idle(self.destroy)
 
