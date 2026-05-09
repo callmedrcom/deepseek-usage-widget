@@ -54,7 +54,7 @@ CSV_CACHE_DIR = CONFIG_DIR / "csv_cache"
 DEFAULT_CONFIG = {
     "api_key": "",
     "refresh_interval": 60,
-    "opacity": 0.90,
+    "opacity": 0.84,
     "model_pricing": {
         "deepseek-chat":         {"input": 2.0,  "output": 8.0,  "cache_hit": 0.2},
         "deepseek-reasoner":     {"input": 4.0,  "output": 16.0, "cache_hit": 0.4},
@@ -70,29 +70,30 @@ DEFAULT_CONFIG = {
 
 # ── UI 颜色主题（深色主题）──────────────────────────────────
 THEME = {
-    "bg":       "#7b93b2",
-    "panel":    "#d8e1ef",
-    "shell":    "#2b2f33",
-    "panel_edge": "#aab7ca",
-    "card":     "#181b1d",
-    "card_edge": "#343b41",
-    "surface0": "#24292d",
-    "surface1": "#30363b",
+    "bg":       "#36393d",
+    "panel":    "#2f3236",
+    "shell":    "#24272a",
+    "panel_edge": "#4a4e53",
+    "card":     "#101113",
+    "card_edge": "#30343a",
+    "surface0": "#1e2124",
+    "surface1": "#2a2d31",
     "fg":       "#f2f4f7",
-    "muted":    "#b8c0cb",
-    "dim":      "#8d98a5",
-    "accent":   "#6ba8ff",
-    "accent_2": "#8e7dff",
-    "green":    "#8ee56e",
-    "yellow":   "#ffb84c",
-    "red":      "#ff6c7c",
-    "bar_bg":   "#2a3137",
-    "bar_in":   "#6ba8ff",
-    "bar_out":  "#8ee56e",
-    "bar_cache": "#b5a1ff",
-    "grid":     "#32383d",
+    "muted":    "#b6bcc4",
+    "dim":      "#8b9199",
+    "accent":   "#7ea5d6",
+    "accent_2": "#7ea5d6",
+    "green":    "#8fb49c",
+    "yellow":   "#d4b171",
+    "red":      "#d07f86",
+    "bar_bg":   "#25282d",
+    "bar_in":   "#6f8fb3",
+    "bar_out":  "#8aa498",
+    "bar_cache": "#8c84a8",
+    "grid":     "#2d3136",
     "shadow":   "#121518",
-    "highlight": "#d6e6ff",
+    "highlight": "#c8d3df",
+    "mono_bar": "#8c98a6",
 }
 
 MODEL_META = {
@@ -1211,6 +1212,9 @@ class DeepSeekWidget(tk.Tk):
                     delta_tokens = current_total - self._prev_total_tokens
                     delta_secs = max(1, (now - self._prev_refresh_time).total_seconds())
                     tpm = max(0, int((delta_tokens / delta_secs) * 60))
+                elif current_total > 0:
+                    refresh_secs = max(1, int(self.config.get("refresh_interval", 60)))
+                    tpm = max(0, int((current_total / refresh_secs) * 60))
                 self._prev_total_tokens = current_total
                 self._prev_refresh_time = now
                 snapshot["tpm"] = tpm
@@ -1509,7 +1513,7 @@ class DeepSeekWidget(tk.Tk):
         computed_bar_w = int((usable_w - computed_gap * (count - 1)) / max(count, 1)) if history else 18
         bar_w = max(14, min(34, computed_bar_w))
         gap = computed_gap
-        accent = THEME["accent"] if metric == "tokens" else THEME["accent_2"]
+        accent = THEME["accent"] if metric == "tokens" else THEME["mono_bar"]
 
         for step in range(4):
             y = top_pad + int((usable_h / 3) * step)
@@ -1525,7 +1529,7 @@ class DeepSeekWidget(tk.Tk):
             self._draw_rounded_bar(canvas, x0, top_pad + 8, x1, y1, THEME["bar_bg"], radius=7)
             self._draw_rounded_bar(canvas, x0, y0, x1, y1, accent, radius=7)
             highlight_w = max(2, int(bar_w * 0.18))
-            if bar_h > 6:
+            if bar_h > 6 and metric == "tokens":
                 self._draw_rounded_bar(canvas, x0 + 2, y0 + 2, min(x1 - 2, x0 + 2 + highlight_w), y1 - 2,
                                        THEME["highlight"], radius=4, stipple="gray50")
             value_y = max(top_pad - 2, y0 - 10)
