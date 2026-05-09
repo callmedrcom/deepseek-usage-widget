@@ -722,6 +722,7 @@ class DeepSeekWidget(tk.Tk):
         self._build_ui()
         self._build_context_menu()
         self._bind_events()
+        self.after_idle(self._fit_window_to_content)
 
         # 定时刷新
         self._refresh_lock = threading.Lock()
@@ -741,6 +742,21 @@ class DeepSeekWidget(tk.Tk):
         wh = min(780, sh - 90)
         wh = max(680, wh)
         self.geometry(f"{ww}x{wh}+{sw - ww - 20}+{sh - wh - 70}")
+
+    def _fit_window_to_content(self):
+        if self._closing:
+            return
+        self.update_idletasks()
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        current_x = self.winfo_x()
+        current_y = self.winfo_y()
+        required_height = max(self.left_panel.winfo_reqheight(), self.right_panel.winfo_reqheight()) + 32
+        target_height = max(680, min(sh - 70, required_height))
+        width = max(760, self.winfo_width())
+        x = min(current_x if current_x > 0 else sw - width - 20, sw - width - 20)
+        y = min(current_y if current_y > 0 else sh - target_height - 70, sh - target_height - 70)
+        self.geometry(f"{width}x{target_height}+{x}+{max(10, y)}")
 
     # ── UI 构建 ───────────────────────────────────────────
     def _build_ui(self):
@@ -817,6 +833,10 @@ class DeepSeekWidget(tk.Tk):
             card = self._card(self.left_panel, pady=10)
             card.pack(fill="x", padx=12, pady=(0, 8))
             self.model_cards.append(self._build_model_card(card))
+
+        self.model_legend = tk.Frame(self.left_panel, bg=THEME["panel"])
+        self.model_legend.pack(fill="x", padx=16, pady=(0, 8))
+        self._build_model_legend()
 
         chart_card = self._card(self.left_panel, pady=12)
         chart_card.pack(fill="both", expand=True, padx=12, pady=(2, 12))
@@ -969,6 +989,24 @@ class DeepSeekWidget(tk.Tk):
             "bar_canvas": bar_canvas,
             "foot": foot,
         }
+
+    def _build_model_legend(self):
+        for child in self.model_legend.winfo_children():
+            child.destroy()
+        items = [
+            ("输入未命中", THEME["bar_in"]),
+            ("输出", THEME["bar_out"]),
+            ("缓存命中", THEME["bar_cache"]),
+        ]
+        for label, color in items:
+            chip = tk.Frame(self.model_legend, bg=THEME["panel"])
+            chip.pack(side="left", padx=(0, 12))
+            dot = tk.Canvas(chip, width=12, height=12, bg=THEME["panel"], highlightthickness=0, bd=0)
+            dot.pack(side="left")
+            self._draw_rounded_bar(dot, 1, 1, 11, 11, color, radius=4)
+            tk.Label(chip, text=label,
+                     bg=THEME["panel"], fg=THEME["shell"],
+                     font=_font(8)).pack(side="left", padx=(4, 0))
 
     def _build_history_table(self):
         headers = ["日期", "数据条", "调用", "费用"]
@@ -1178,9 +1216,64 @@ class DeepSeekWidget(tk.Tk):
                 snapshot["tpm"] = tpm
 
             if not self._closing:
-                self.after(0, lambda s=snapshot: self._full_render(s))
+                self.after(0, lambda s=snapshot: self._apply_snapshot(s))
 
         threading.Thread(target=fetch, daemon=True).start()
+
+    def _apply_snapshot(self, snapshot):
+        if self._closing:
+            return
+        self.balance_data = snapshot.get("balance_data")
+        self.balance_error = snapshot.get("balance_error")
+        self.usage_error = snapshot.get("usage_error")
+        self.last_refresh = snapshot.get("last_refresh")
+        self._current_tpm = snapshot.get("tpm", 0)
+
+        usage = snapshot.get("usage_data")
+        if usage:
+            self.today_input = usage.get("today_input", 0)
+            self.today_output = usage.get("today_output", 0)
+            self.today_calls = usage.get("today_calls", 0)
+            self.today_cost = usage.get("today_cost", 0.0)
+            self.by_model = usage.get("by_model", {})
+            self.selected_date = usage.get("selected_date", date.today().isoformat())
+            self.month_cost = usage.get("month_cost", self.today_cost)
+            self.month_calls = usage.get("month_calls", self.today_calls)
+            self.month_tokens = usage.get("month_tokens", self.today_input + self.today_output)
+            self.daily_history = usage.get("daily_history", [])
+        self._full_render()
+
+    def _apply_usage(self, agg):
+        tin = agg["total_input"]
+        tout = agg["total_output"]
+        tcalls = agg["total_calls"]
+        tcost = agg["total_cost"]
+        by_model = agg.get("by_model", {})
+        sel_date = agg.get("selected_date") or date.today().isoformat()
+        mcost = agg.get("month_cost", tcost)
+        mcalls = agg.get("month_calls", tcalls)
+        mtokens = agg.get("month_input", tin) + agg.get("month_output", tout)
+        cache_history = load_daily_history()
+        merged_history = merge_daily_history(cache_history, agg.get("daily_history", []))
+        if sel_date:
+            merged_history = merge_daily_history(merged_history, [{
+                "date": sel_date,
+                "tokens": tin + tout,
+                "cost": tcost,
+                "calls": tcalls,
+            }])
+        save_daily_history({item["date"]: item for item in merged_history})
+
+        self.today_input = tin
+        self.today_output = tout
+        self.today_calls = tcalls
+        self.today_cost = tcost
+        self.by_model = by_model
+        self.selected_date = sel_date
+        self.month_cost = mcost
+        self.month_calls = mcalls
+        self.month_tokens = mtokens
+        self.daily_history = merged_history
 
     # ── UI 渲染 ───────────────────────────────────────────
     def _full_render(self):
@@ -1270,6 +1363,7 @@ class DeepSeekWidget(tk.Tk):
             parts.append("暂无用量数据")
         self.lbl_status.config(text="  ".join(parts),
                                fg=THEME["red"] if self.usage_error else THEME["dim"])
+        self.after_idle(self._fit_window_to_content)
 
     def _render_model_cards(self):
         ranked = []
