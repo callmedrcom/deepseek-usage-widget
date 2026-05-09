@@ -82,7 +82,7 @@ echo.
     --distpath "%~dp0" ^
     --workpath "%~dp0build_temp" ^
     --specpath "%~dp0build_temp" ^
-    "%~dp0deepseek_usage_widget.py"
+    "%~dp0deepseek_usage_widget/widget.py"
 
 if %errorlevel% neq 0 (
     echo.

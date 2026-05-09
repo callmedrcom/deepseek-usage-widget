@@ -70,7 +70,7 @@ pyinstaller ^
     --distpath "%USERPROFILE%\Desktop" ^
     --workpath "%TEMP%\deepseek_build" ^
     --specpath "%TEMP%\deepseek_build" ^
-    "%~dp0deepseek_usage_widget.py"
+    "%~dp0deepseek_usage_widget/widget.py"
 
 if %errorlevel% neq 0 (
     echo.

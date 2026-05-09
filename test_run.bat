@@ -32,5 +32,5 @@ echo         (右键悬浮窗可打开设置、输入 API Key)
 echo         (关闭此命令行窗口不会影响悬浮窗)
 echo.
 
-python "%~dp0deepseek_usage_widget.py"
+python -m deepseek_usage_widget.widget
 pause

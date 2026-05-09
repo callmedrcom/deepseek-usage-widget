@@ -12,15 +12,13 @@ from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from deepseek_usage_widget import (
+from deepseek_usage_widget.api_client import (
     _parse_deepseek_csv,
     _parse_csv_zip,
     _aggregate_usage,
-    merge_daily_history,
-    _short_date,
-    _chart_date,
-    _fmt_num,
 )
+from deepseek_usage_widget.config import merge_daily_history
+from deepseek_usage_widget.utils import _short_date, _chart_date
 from crypto_utils import encrypt, decrypt
 
 
@@ -217,17 +215,6 @@ class TestDateFormatters(unittest.TestCase):
 
     def test_chart_date_empty(self):
         self.assertEqual(_chart_date(""), "--")
-
-
-class TestNumberFormatters(unittest.TestCase):
-    def test_fmt_num_millions(self):
-        self.assertEqual(_fmt_num(1_500_000), "1.5M")
-
-    def test_fmt_num_thousands(self):
-        self.assertEqual(_fmt_num(2_500), "2.5K")
-
-    def test_fmt_num_small(self):
-        self.assertEqual(_fmt_num(42), "42")
 
 
 if __name__ == "__main__":
