@@ -742,7 +742,7 @@ class DeepSeekWidget(tk.Tk):
     def _position_window(self):
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        ww = 760
+        ww = 940
         wh = min(780, sh - 90)
         wh = max(736, wh)
         self.geometry(f"{ww}x{wh}+{sw - ww - 20}+{sh - wh - 70}")
@@ -758,13 +758,17 @@ class DeepSeekWidget(tk.Tk):
         current_x = self.winfo_x()
         current_y = self.winfo_y()
         required_height = max(self.left_panel.winfo_reqheight(), self.right_panel.winfo_reqheight()) + 32
+        required_width = self.left_panel.winfo_reqwidth() + self.right_panel.winfo_reqwidth() + 80
         target_height = max(680, current_height, min(sh - 70, required_height))
-        width = max(760, current_width)
+        width = max(940, current_width, min(sw - 40, required_width))
         if target_height <= current_height + 16 and abs(width - current_width) < 2:
             return
         if abs(target_height - current_height) < 2 and abs(width - current_width) < 2:
             return
-        x = min(current_x if current_x > 0 else sw - width - 20, sw - width - 20)
+        if current_x > 0:
+            x = min(current_x - max(0, width - current_width), sw - width - 20)
+        else:
+            x = sw - width - 20
         if current_y > 0:
             y = min(current_y - max(0, target_height - current_height), sh - target_height - 70)
         else:
@@ -810,11 +814,23 @@ class DeepSeekWidget(tk.Tk):
 
         actions = tk.Frame(header, bg=THEME["shell"])
         actions.pack(side="right")
-        for text in ("↻", "⚙", "×"):
-            chip = tk.Label(actions, text=text,
-                            bg=THEME["surface0"], fg=THEME["muted"],
-                            font=_font(9, bold=True), width=2)
+        action_items = [
+            ("↻", self._schedule_refresh, "立即刷新"),
+            ("⚙", self._open_settings, "打开设置"),
+            ("×", self._on_close, "关闭窗口"),
+        ]
+        self.action_buttons = []
+        for text, command, tooltip in action_items:
+            chip = tk.Button(actions, text=text,
+                             command=command,
+                             bg=THEME["surface0"], fg=THEME["muted"],
+                             activebackground=THEME["surface1"], activeforeground=THEME["fg"],
+                             relief="flat", bd=0, cursor="hand2",
+                             font=_font(9, bold=True), width=2)
+            chip._skip_drag_binding = True
+            chip._tooltip_text = tooltip
             chip.pack(side="left", padx=3)
+            self.action_buttons.append(chip)
 
         summary = self._card(self.left_panel, pady=12)
         summary.pack(fill="x", padx=12, pady=(10, 10))
@@ -1085,13 +1101,18 @@ class DeepSeekWidget(tk.Tk):
 
         def bind_children(w):
             for child in w.winfo_children():
-                child.bind("<Button-1>", self._drag_start)
-                child.bind("<B1-Motion>", self._drag_move)
+                if not getattr(child, "_skip_drag_binding", False) and not self._is_interactive_widget(child):
+                    child.bind("<Button-1>", self._drag_start)
+                    child.bind("<B1-Motion>", self._drag_move)
                 child.bind("<Button-3>", self._context_menu)
                 bind_children(child)
 
         bind_children(self)
         self.bind("<Button-3>", self._context_menu)
+
+    def _is_interactive_widget(self, widget):
+        interactive_types = (tk.Button, tk.Entry, tk.Scale, tk.Menubutton, ttk.Button, ttk.Entry, ttk.Scale)
+        return isinstance(widget, interactive_types)
 
     def _drag_start(self, event):
         self._drag_offset = (event.x_root - self.winfo_x(),
