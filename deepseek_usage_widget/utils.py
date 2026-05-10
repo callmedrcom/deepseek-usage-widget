@@ -2,7 +2,7 @@
 from datetime import datetime, date
 from pathlib import Path
 
-from .models import logger
+from .models import logger, CSV_CACHE_DIR
 from .api_client import _parse_csv_zip
 
 def _short_date(value):
@@ -54,8 +54,19 @@ def _load_local_zip(target_date=None):
                 zip_path = candidates[0][1]
                 logger.info("本地 ZIP 发现: %s", zip_path.name)
                 with open(zip_path, "rb") as f:
-                    result = _parse_csv_zip(f.read(), target_date)
+                    raw = f.read()
+                result = _parse_csv_zip(raw, target_date)
                 if result["total_calls"] > 0 or result["total_cost"] > 0:
+                    # 缓存到 csv_cache
+                    try:
+                        now_ts = datetime.now().strftime("%Y-%m_%d_%H%M%S")
+                        CSV_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                        dest = CSV_CACHE_DIR / f"usage_{now_ts}.zip"
+                        with open(dest, "wb") as f:
+                            f.write(raw)
+                        logger.info("本地 ZIP 已缓存: %s", dest.name)
+                    except Exception:
+                        logger.warning("缓存写入失败", exc_info=True)
                     logger.info("本地 ZIP 解析成功: %s 次调用", result.get("total_calls", 0))
                     return result
         except Exception as e:

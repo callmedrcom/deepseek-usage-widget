@@ -56,17 +56,22 @@ class DeepSeekAPI:
         """
         从 DeepSeek 平台下载用量 CSV 导出 ZIP。
         返回 _parse_deepseek_csv 的聚合结果，或 None。
-        成功下载后缓存到 CSV_CACHE_DIR，相同月份不再重复下载。
+        成功下载后缓存到 CSV_CACHE_DIR，文件名含精确时间以支持分钟级更新。
         """
         if target_date is None:
             target_date = date.today()
         ds = target_date.isoformat() if isinstance(target_date, date) else str(target_date)
         ym = ds[:7]  # "2026-05"
 
-        # ── 检查缓存 ──
+        # ── 检查缓存（取最新匹配文件）──
         CSV_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache_file = CSV_CACHE_DIR / f"usage_{ym}.zip"
-        if cache_file.exists():
+        prefix = f"usage_{ym}_"
+        candidates = sorted(
+            [p for p in CSV_CACHE_DIR.iterdir() if p.is_file() and p.name.startswith(prefix)],
+            key=lambda p: p.stat().st_mtime, reverse=True,
+        )
+        if candidates:
+            cache_file = candidates[0]
             logger.info("使用缓存用量: %s", cache_file.name)
             try:
                 with open(cache_file, "rb") as f:
@@ -105,6 +110,8 @@ class DeepSeekAPI:
                     ct = resp.headers.get("content-type", "")
                     if "zip" in ct or "octet-stream" in ct or resp.content[:2] == b"PK":
                         logger.info("CSV 下载成功: %s %s", method, url)
+                        now = datetime.now().strftime("%d_%H%M%S")
+                        cache_file = CSV_CACHE_DIR / f"usage_{ym}_{now}.zip"
                         try:
                             with open(cache_file, "wb") as f:
                                 f.write(resp.content)

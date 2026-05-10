@@ -8,7 +8,7 @@ import threading
 import os
 from datetime import datetime, date
 
-from .models import CONFIG_DIR, CONFIG_FILE, DEFAULT_CONFIG, THEME, MODEL_META, LOGO_FILE, logger
+from .models import CONFIG_DIR, CONFIG_FILE, DEFAULT_CONFIG, THEME, MODEL_META, LOGO_FILE, CSV_CACHE_DIR, logger
 from .api_client import DeepSeekAPI, _aggregate_usage, _parse_csv_zip, _parse_deepseek_csv
 from .config import load_config, save_config, load_daily_history, save_daily_history, merge_daily_history
 from .utils import _short_date, _chart_date, _load_local_zip, _api_error_msg
@@ -1126,7 +1126,7 @@ class DeepSeekWidget(tk.Tk):
 
     # ── CSV 导入 ──────────────────────────────────────────
     def _import_csv(self):
-        """手动导入 CSV/ZIP 文件"""
+        """手动导入 CSV/ZIP 文件，同时缓存到 CSV_CACHE_DIR"""
         from tkinter import filedialog
         path = filedialog.askopenfilename(
             title="选择 DeepSeek 用量 CSV 或 ZIP 文件",
@@ -1138,7 +1138,18 @@ class DeepSeekWidget(tk.Tk):
         try:
             if path.lower().endswith(".zip"):
                 with open(path, "rb") as f:
-                    agg = _parse_csv_zip(f.read())
+                    raw = f.read()
+                agg = _parse_csv_zip(raw)
+                # 缓存 ZIP 到 csv_cache，文件名含精确时间
+                try:
+                    now_ts = datetime.now().strftime("%Y-%m_%d_%H%M%S")
+                    CSV_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                    dest = CSV_CACHE_DIR / f"usage_{now_ts}.zip"
+                    with open(dest, "wb") as f:
+                        f.write(raw)
+                    logger.info("导入的 ZIP 已缓存: %s", dest.name)
+                except Exception:
+                    logger.warning("缓存写入失败", exc_info=True)
             else:
                 with open(path, "r", encoding="utf-8-sig") as f:
                     agg = _parse_deepseek_csv(f.read(), "")
