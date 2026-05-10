@@ -201,6 +201,7 @@ class DeepSeekWidget(tk.Tk):
         self._refresh_job_id = None
         self._settings_window = None
         self._closing = False
+        self._initial_fit_done = False
         self.refresh_interval_ms = self.config.get("refresh_interval", 60) * 1000
         self.after(500, self._schedule_refresh)
 
@@ -697,6 +698,8 @@ class DeepSeekWidget(tk.Tk):
                             if csv_result and (csv_result.get("total_calls", 0) > 0 or csv_result.get("total_cost", 0) > 0):
                                 usage_data = _build_snapshot(csv_result)
                                 got_usage = True
+                            else:
+                                errors.append("CSV下载: 所有端点均不可达")
                         except Exception as e:
                             errors.append(f"CSV下载: {_api_error_msg(e)}")
 
@@ -873,7 +876,9 @@ class DeepSeekWidget(tk.Tk):
         self.lbl_status.config(text=status_text,
                        fg=THEME["red"] if self.usage_error else THEME["dim"],
                        wraplength=wrap_width)
-        self.after_idle(self._fit_window_to_content)
+        if not self._initial_fit_done:
+            self._initial_fit_done = True
+            self.after_idle(self._fit_window_to_content)
 
     def _render_model_cards(self):
         ranked = []

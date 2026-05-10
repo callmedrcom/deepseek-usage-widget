@@ -12,7 +12,7 @@ except ImportError:
     import sys
     sys.exit(1)
 
-from .models import logger
+from .models import logger, CSV_CACHE_DIR
 
 class DeepSeekAPI:
     def __init__(self, config):
@@ -56,28 +56,40 @@ class DeepSeekAPI:
         """
         从 DeepSeek 平台下载用量 CSV 导出 ZIP。
         返回 _parse_deepseek_csv 的聚合结果，或 None。
+        成功下载后缓存到 CSV_CACHE_DIR，相同月份不再重复下载。
         """
         if target_date is None:
             target_date = date.today()
         ds = target_date.isoformat() if isinstance(target_date, date) else str(target_date)
         ym = ds[:7]  # "2026-05"
 
-        # 端点列表：POST 触发导出 → GET 下载
+        # ── 检查缓存 ──
+        CSV_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache_file = CSV_CACHE_DIR / f"usage_{ym}.zip"
+        if cache_file.exists():
+            logger.info("使用缓存用量: %s", cache_file.name)
+            try:
+                with open(cache_file, "rb") as f:
+                    result = _parse_csv_zip(f.read(), target_date)
+                if result["total_calls"] > 0 or result["total_cost"] > 0:
+                    return result
+            except Exception:
+                logger.warning("缓存损坏，重新下载", exc_info=True)
+
+        # 端点列表
         endpoints = [
-            # 方式1: GET 直接下载
             ("GET", f"{self.platform_url}/api/usage/export?year_month={ym}"),
             ("GET", f"{self.platform_url}/api/usage/download?year_month={ym}"),
             ("GET", f"{self.platform_url}/api/billing/usage/export?year_month={ym}"),
-            # 方式2: POST 触发
             ("POST", f"{self.platform_url}/api/usage/export",
              {"year_month": ym}),
             ("POST", f"{self.platform_url}/api/billing/export",
              {"year_month": ym, "format": "csv"}),
-            # 方式3: api.deepseek.com
             ("GET", f"{self.base_url}/v1/usage/export?year_month={ym}"),
             ("GET", f"{self.base_url}/billing/usage/export?year_month={ym}"),
         ]
 
+        last_status = None
         for endpoint in endpoints:
             method = endpoint[0]
             url = endpoint[1]
@@ -93,6 +105,11 @@ class DeepSeekAPI:
                     ct = resp.headers.get("content-type", "")
                     if "zip" in ct or "octet-stream" in ct or resp.content[:2] == b"PK":
                         logger.info("CSV 下载成功: %s %s", method, url)
+                        try:
+                            with open(cache_file, "wb") as f:
+                                f.write(resp.content)
+                        except Exception:
+                            logger.warning("缓存写入失败", exc_info=True)
                         result = _parse_csv_zip(resp.content, target_date)
                         if result["total_calls"] > 0 or result["total_cost"] > 0:
                             return result
@@ -108,8 +125,15 @@ class DeepSeekAPI:
                             return agg
                     except (ValueError, KeyError, TypeError):
                         pass
-            except requests.RequestException:
+                else:
+                    last_status = resp.status_code
+                    logger.warning("CSV 端点 HTTP %s: %s %s", resp.status_code, method, url)
+            except requests.RequestException as e:
+                logger.warning("CSV 请求失败: %s %s — %s", method, url, e)
                 continue
+
+        if last_status:
+            logger.warning("所有 CSV 端点均失败, 最后状态码: %s", last_status)
         return None
 
     def update_key(self, new_key):
