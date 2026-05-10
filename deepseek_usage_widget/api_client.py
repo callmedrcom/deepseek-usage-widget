@@ -73,33 +73,17 @@ class DeepSeekAPI:
     def get_usage_csv(self, target_date=None):
         """
         从 DeepSeek 平台下载用量 CSV 导出 ZIP。
+        先尝试下载最新数据；下载失败时才回退到缓存。
         返回 _parse_deepseek_csv 的聚合结果，或 None。
-        成功下载后缓存到 CSV_CACHE_DIR，文件名含精确时间以支持分钟级更新。
         """
         if target_date is None:
             target_date = date.today()
         ds = target_date.isoformat() if isinstance(target_date, date) else str(target_date)
         ym = ds[:7]  # "2026-05"
 
-        # ── 检查缓存（取最新匹配文件）──
         CSV_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        prefix = f"usage_{ym}_"
-        candidates = sorted(
-            [p for p in CSV_CACHE_DIR.iterdir() if p.is_file() and p.name.startswith(prefix)],
-            key=lambda p: p.stat().st_mtime, reverse=True,
-        )
-        if candidates:
-            cache_file = candidates[0]
-            logger.info("使用缓存用量: %s", cache_file.name)
-            try:
-                with open(cache_file, "rb") as f:
-                    result = _parse_csv_zip(f.read(), target_date)
-                if result["total_calls"] > 0 or result["total_cost"] > 0:
-                    return result
-            except Exception:
-                logger.warning("缓存损坏，重新下载", exc_info=True)
 
-        # 端点列表
+        # ── 端点列表 ──
         endpoints = [
             ("GET", f"{self.platform_url}/api/usage/export?year_month={ym}"),
             ("GET", f"{self.platform_url}/api/usage/download?year_month={ym}"),
@@ -112,6 +96,7 @@ class DeepSeekAPI:
             ("GET", f"{self.base_url}/billing/usage/export?year_month={ym}"),
         ]
 
+        # ── 1. 先尝试下载 ──
         last_status = None
         for endpoint in endpoints:
             method = endpoint[0]
@@ -136,9 +121,12 @@ class DeepSeekAPI:
                             _trim_cache()
                         except Exception:
                             logger.warning("缓存写入失败", exc_info=True)
-                        result = _parse_csv_zip(resp.content, target_date)
-                        if result["total_calls"] > 0 or result["total_cost"] > 0:
-                            return result
+                        try:
+                            result = _parse_csv_zip(resp.content, target_date)
+                            if result["total_calls"] > 0 or result["total_cost"] > 0:
+                                return result
+                        except (ValueError, KeyError) as e:
+                            logger.warning("ZIP 解析失败: %s %s — %s", method, url, e)
                     if "csv" in ct or "text/csv" in ct:
                         text = resp.text
                         result = _parse_deepseek_csv(text, "", target_date)
@@ -158,8 +146,25 @@ class DeepSeekAPI:
                 logger.warning("CSV 请求失败: %s %s — %s", method, url, e)
                 continue
 
-        if last_status:
-            logger.warning("所有 CSV 端点均失败, 最后状态码: %s", last_status)
+        # ── 2. 下载失败，回退缓存（取最新匹配文件）──
+        prefix = f"usage_{ym}_"
+        candidates = sorted(
+            [p for p in CSV_CACHE_DIR.iterdir() if p.is_file() and p.name.startswith(prefix)],
+            key=lambda p: p.stat().st_mtime, reverse=True,
+        )
+        if candidates:
+            cache_file = candidates[0]
+            logger.info("下载失败，回退缓存: %s", cache_file.name)
+            try:
+                with open(cache_file, "rb") as f:
+                    result = _parse_csv_zip(f.read(), target_date)
+                if result["total_calls"] > 0 or result["total_cost"] > 0:
+                    return result
+            except Exception:
+                logger.warning("缓存损坏", exc_info=True)
+
+        logger.warning("所有 CSV 端点均失败%s",
+                       f", 最后状态码: {last_status}" if last_status else "")
         return None
 
     def update_key(self, new_key):

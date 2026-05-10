@@ -49,7 +49,8 @@ echo [ OK ] Dependencies installed
 :: Verify package
 echo.
 echo [ .. ] Verifying package...
-%PY% -c "import sys; sys.path.insert(0, r'%~dp0'); from run_widget import main; print('OK')"
+set "PROJ_DIR=%~dp0"
+%PY% -c "import sys; sys.path.insert(0, r'%PROJ_DIR:\=/%'.rstrip('/')); from run_widget import main; print('OK')"
 if %errorlevel% neq 0 (
     echo [FAIL] Package verification failed - check for syntax errors
     goto end
