@@ -8,12 +8,11 @@ import threading
 import os
 from datetime import datetime, date
 
-from .models import CONFIG_DIR, CONFIG_FILE, DEFAULT_CONFIG, THEME, MODEL_META, logger
-from .api_client import DeepSeekAPI, _aggregate_usage
+from .models import CONFIG_DIR, CONFIG_FILE, DEFAULT_CONFIG, THEME, MODEL_META, LOGO_FILE, logger
+from .api_client import DeepSeekAPI, _aggregate_usage, _parse_csv_zip, _parse_deepseek_csv
 from .config import load_config, save_config, load_daily_history, save_daily_history, merge_daily_history
 from .utils import _short_date, _chart_date, _load_local_zip, _api_error_msg
 
-import tkinter.font as tkfont
 _AF = None
 
 def _available_fonts():
@@ -66,9 +65,10 @@ class SettingsWindow(tk.Toplevel):
                                   insertbackground=THEME["fg"],
                                   font=_font(10, fixed=True), relief="flat", bd=8)
         self.key_entry.pack(side="left", fill="x", expand=True)
-        self._show_btn = tk.Button(key_frame, text="👁", width=3,
+        self._show_btn = tk.Button(key_frame, text="Show", width=5,
                                    bg=THEME["surface0"], fg=THEME["fg"],
                                    relief="flat", cursor="hand2", bd=0,
+                                   font=_font(9),
                                    command=self._toggle_key_visibility)
         self._show_btn.pack(side="right", padx=(4, 0))
 
@@ -133,10 +133,10 @@ class SettingsWindow(tk.Toplevel):
     def _toggle_key_visibility(self):
         if self.key_entry.cget("show") == "*":
             self.key_entry.configure(show="")
-            self._show_btn.configure(text="🙈")
+            self._show_btn.configure(text="Hide")
         else:
             self.key_entry.configure(show="*")
-            self._show_btn.configure(text="👁")
+            self._show_btn.configure(text="Show")
 
     def _save(self):
         self.config["api_key"] = self.key_var.get().strip()

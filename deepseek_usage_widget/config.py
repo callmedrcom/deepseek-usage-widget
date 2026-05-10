@@ -33,6 +33,11 @@ def save_config(cfg):
 def load_daily_history():
     if not DAILY_FILE.exists():
         return {}
+    try:
+        with open(DAILY_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError, OSError):
+        return {}
 
 def save_daily_history(history):
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)

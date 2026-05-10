@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.spec
+*.exe
 dist/
 *.egg-info/
 .DS_Store

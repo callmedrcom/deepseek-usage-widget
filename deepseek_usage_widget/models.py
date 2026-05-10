@@ -15,6 +15,7 @@ CONFIG_DIR = Path.home() / ".deepseek_widget"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 DAILY_FILE = CONFIG_DIR / "daily.json"
 CSV_CACHE_DIR = CONFIG_DIR / "csv_cache"
+LOGO_FILE = CONFIG_DIR / "logo.png"
 
 # ── 默认配置 ────────────────────────────────────────────────
 DEFAULT_CONFIG = {
