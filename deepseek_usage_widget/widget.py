@@ -895,7 +895,11 @@ class DeepSeekWidget(tk.Tk):
         self.tokens_stat["value"].config(text=f"{self.month_tokens:,}" if self.month_tokens else f"{total_tokens:,}" if total_tokens else "--")
         self.tokens_stat["sub"].config(text="月累计 Tokens" if self.month_tokens else "当日 Tokens")
 
-        recent_history = self.daily_history[-7:]
+        # 取最近 7 天（以 selected_date 为终点），避免展示未来空数据
+        sel_idx = next((i for i, item in enumerate(self.daily_history)
+                        if item["date"] == self.selected_date), len(self.daily_history) - 1)
+        start = max(0, sel_idx - 6)
+        recent_history = self.daily_history[start:sel_idx + 1]
         self._render_model_cards()
         self._draw_history_chart(self.left_chart, recent_history, "cost")
         self._draw_history_chart(self.right_chart, recent_history, "tokens")
@@ -949,8 +953,11 @@ class DeepSeekWidget(tk.Tk):
                 card["icon"].config(text=icon_text, fg=color)
                 card["title"].config(text=meta.get("label", model.replace("deepseek-", "").upper()))
                 badge = meta.get("badge", "模型")
-                card["meta"].config(text=f"{tokens:,} Tokens")
                 cost_value = metrics.get("cost", 0.0)
+                if cost_value > 0 and tokens < 100:
+                    card["meta"].config(text=f"¥{tokens:.2f} 费用")
+                else:
+                    card["meta"].config(text=f"{tokens:,.0f} Tokens")
                 calls_value = metrics.get("calls", 0)
                 if cost_value > 0:
                     value_text = f"¥{cost_value:.2f}"
@@ -960,11 +967,15 @@ class DeepSeekWidget(tk.Tk):
                     value_text = "--"
                 card["value"].config(text=value_text)
                 self._render_model_progress(card["bar_canvas"], metrics)
-                input_tokens = metrics.get('input', 0)
-                output_tokens = metrics.get('output', 0)
-                cache_hit_tokens = metrics.get('cache_hit', 0)
-                miss_tokens = max(0, input_tokens - cache_hit_tokens)
-                card["foot"].config(text=f"{badge}  入 {self._format_axis_value(miss_tokens)}  出 {self._format_axis_value(output_tokens)}  缓 {self._format_axis_value(cache_hit_tokens)}")
+                input_val = metrics.get('input', 0)
+                output_val = metrics.get('output', 0)
+                cache_hit_val = metrics.get('cache_hit', 0)
+                miss_val = max(0, input_val - cache_hit_val)
+                # 平台 API 返回费用 (CNY)，CSV 返回 token 数，按是否有 cost 区分格式
+                if cost_value > 0 and input_val < 100:
+                    card["foot"].config(text=f"{badge}  入 ¥{miss_val:.2f}  出 ¥{output_val:.2f}  缓 ¥{cache_hit_val:.2f}")
+                else:
+                    card["foot"].config(text=f"{badge}  入 {self._format_axis_value(miss_val)}  出 {self._format_axis_value(output_val)}  缓 {self._format_axis_value(cache_hit_val)}")
             else:
                 card["icon"].config(text="○", fg=THEME["dim"])
                 card["title"].config(text="等待模型数据")

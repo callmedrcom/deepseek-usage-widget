@@ -370,85 +370,92 @@ def _parse_deepseek_csv(amount_text, cost_text="", target_date=None):
 
 def _aggregate_platform_cost(data, target_date=None):
     """
-    解析 platform.deepseek.com /api/v0/usage/cost 返回的 JSON 数据。
-    data 可能是 list（每日记录）或 dict（含 daily_costs 等字段）。
+    解析 platform.deepseek.com /api/v0/usage/cost 返回的 JSON。
+    实际结构: data.biz_data[0] = { total: [...], days: [{date, data: [...]}] }
+    每日 data[] 中每项: {model, usage: [{type, amount}, ...]}
+    amount 为费用 (CNY)。
     """
     if target_date is None:
         target_date = date.today().isoformat()
     elif isinstance(target_date, date):
         target_date = target_date.isoformat()
 
-    # 提取每日记录列表
-    records = []
-    if isinstance(data, list):
-        records = data
-    elif isinstance(data, dict):
-        records = data.get("daily_costs") or data.get("costs") or data.get("items") or []
-        if not records and "cost" in data:
-            records = [data]
-    if not records:
-        logger.warning("平台 API 返回数据格式无法识别: %s", type(data).__name__)
+    # 定位 biz_data
+    biz_data = data
+    if isinstance(data, dict):
+        biz_data = data.get("biz_data") or data.get("data") or data
+    if isinstance(biz_data, list):
+        biz_data = biz_data[0] if biz_data else {}
+    if not isinstance(biz_data, dict):
+        logger.warning("平台 API biz_data 格式异常")
         return None
 
-    total_cost = 0.0
-    total_calls = 0
+    days = biz_data.get("days") or []
+    if not days:
+        logger.warning("平台 API 返回无 days 数据")
+        return None
+
+    # ── 累计每日 + 按模型 ──
     daily_history = []
     by_model = {}
-    all_dates = []
     month_cost = 0.0
-    month_calls = 0
 
-    for r in records:
-        d = (r.get("date") or r.get("utc_date") or r.get("day", "")).strip()
-        cost_raw = r.get("cost")
-        if cost_raw is None:
-            cost_raw = r.get("total_cost")
-        if cost_raw is None:
-            cost_raw = r.get("amount", 0)
-        cost = float(cost_raw or 0)
-        calls = int(r.get("calls") or r.get("request_count") or r.get("api_calls") or 0)
-
+    for day in days:
+        d = day.get("date", "").strip()
         if not d:
             continue
 
-        all_dates.append(d)
-        month_cost += cost
-        month_calls += calls
+        day_cost = 0.0
+        for entry in day.get("data", []):
+            model = entry.get("model", "unknown")
+            mc_cost = 0.0
+            mc_input = 0.0
+            mc_output = 0.0
+            mc_cache_hit = 0.0
 
-        daily_history.append({
-            "date": d,
-            "tokens": 0,  # platform cost API 通常不含 token 数
-            "cost": cost,
-            "calls": calls,
-        })
+            for u in entry.get("usage", []):
+                amt = float(u.get("amount", 0))
+                t = u.get("type", "")
+                if t == "PROMPT_CACHE_HIT_TOKEN":
+                    mc_cache_hit += amt
+                    mc_input += amt
+                elif t == "PROMPT_CACHE_MISS_TOKEN":
+                    mc_input += amt
+                elif t == "RESPONSE_TOKEN":
+                    mc_output += amt
+                elif t == "PROMPT_TOKEN":
+                    mc_input += amt
+                mc_cost += amt
 
-        # 按模型拆分可能嵌套在 models / details 字段中
-        model_items = r.get("models") or r.get("details") or r.get("breakdown") or []
-        if isinstance(model_items, dict):
-            model_items = [{"model": k, **v} for k, v in model_items.items()]
-        for mi in model_items:
-            model = mi.get("model") or mi.get("model_name") or "unknown"
-            mcost = float(mi.get("cost") or mi.get("amount") or 0)
-            mcalls = int(mi.get("calls") or mi.get("request_count") or 0)
+            day_cost += mc_cost
+
+            if mc_cost <= 0:
+                continue
+
             if model not in by_model:
                 by_model[model] = {"input": 0, "output": 0, "cache_hit": 0, "calls": 0, "cost": 0.0}
-            by_model[model]["cost"] += mcost
-            by_model[model]["calls"] += mcalls
+            by_model[model]["input"] += mc_input
+            by_model[model]["output"] += mc_output
+            by_model[model]["cache_hit"] += mc_cache_hit
+            by_model[model]["cost"] += mc_cost
 
-    if not all_dates:
-        logger.warning("平台 API 返回数据无日期字段")
-        return None
+        month_cost += day_cost
+        daily_history.append({
+            "date": d,
+            "tokens": 0,
+            "cost": day_cost,
+            "calls": 0,
+        })
 
-    all_dates.sort()
+    all_dates = sorted(item["date"] for item in daily_history)
     latest_date = all_dates[-1]
     selected_date = target_date if target_date in all_dates else latest_date
-
     selected_cost = sum(item["cost"] for item in daily_history if item["date"] == selected_date)
 
     return {
         "total_input": 0,
         "total_output": 0,
-        "total_calls": month_calls,
+        "total_calls": 0,
         "total_cost": selected_cost,
         "by_model": by_model,
         "selected_date": selected_date,
@@ -457,7 +464,7 @@ def _aggregate_platform_cost(data, target_date=None):
         "month_input": 0,
         "month_output": 0,
         "month_cache_hit": 0,
-        "month_calls": month_calls,
+        "month_calls": 0,
         "month_cost": month_cost,
     }
 
