@@ -9,7 +9,7 @@ import os
 from datetime import datetime, date
 
 from .models import CONFIG_DIR, CONFIG_FILE, DEFAULT_CONFIG, THEME, MODEL_META, LOGO_FILE, CSV_CACHE_DIR, logger
-from .api_client import DeepSeekAPI, _aggregate_usage, _parse_csv_zip, _parse_deepseek_csv
+from .api_client import DeepSeekAPI, _aggregate_usage, _parse_csv_zip, _parse_deepseek_csv, _trim_cache
 from .config import load_config, save_config, load_daily_history, save_daily_history, merge_daily_history
 from .utils import _short_date, _chart_date, _load_local_zip, _api_error_msg
 
@@ -1147,6 +1147,7 @@ class DeepSeekWidget(tk.Tk):
                     dest = CSV_CACHE_DIR / f"usage_{now_ts}.zip"
                     with open(dest, "wb") as f:
                         f.write(raw)
+                    _trim_cache()
                     logger.info("导入的 ZIP 已缓存: %s", dest.name)
                 except Exception:
                     logger.warning("缓存写入失败", exc_info=True)

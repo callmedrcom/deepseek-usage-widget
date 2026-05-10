@@ -3,6 +3,7 @@ import json
 import csv
 import io
 import zipfile
+import os as _os
 from datetime import datetime, date
 
 try:
@@ -13,6 +14,23 @@ except ImportError:
     sys.exit(1)
 
 from .models import logger, CSV_CACHE_DIR
+
+MAX_CACHE_FILES = 100
+
+
+def _trim_cache():
+    """保持 CSV_CACHE_DIR 下最多 MAX_CACHE_FILES 个文件，按修改时间删除最早的。"""
+    try:
+        files = sorted(
+            [p for p in CSV_CACHE_DIR.iterdir() if p.is_file() and p.name.startswith("usage_")],
+            key=lambda p: p.stat().st_mtime,
+        )
+        while len(files) > MAX_CACHE_FILES:
+            oldest = files.pop(0)
+            _os.unlink(oldest)
+            logger.info("缓存淘汰: %s", oldest.name)
+    except Exception:
+        pass
 
 class DeepSeekAPI:
     def __init__(self, config):
@@ -115,6 +133,7 @@ class DeepSeekAPI:
                         try:
                             with open(cache_file, "wb") as f:
                                 f.write(resp.content)
+                            _trim_cache()
                         except Exception:
                             logger.warning("缓存写入失败", exc_info=True)
                         result = _parse_csv_zip(resp.content, target_date)

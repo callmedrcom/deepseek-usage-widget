@@ -3,7 +3,7 @@ from datetime import datetime, date
 from pathlib import Path
 
 from .models import logger, CSV_CACHE_DIR
-from .api_client import _parse_csv_zip
+from .api_client import _parse_csv_zip, _trim_cache
 
 def _short_date(value):
     if not value:
@@ -64,6 +64,7 @@ def _load_local_zip(target_date=None):
                         dest = CSV_CACHE_DIR / f"usage_{now_ts}.zip"
                         with open(dest, "wb") as f:
                             f.write(raw)
+                        _trim_cache()
                         logger.info("本地 ZIP 已缓存: %s", dest.name)
                     except Exception:
                         logger.warning("缓存写入失败", exc_info=True)
