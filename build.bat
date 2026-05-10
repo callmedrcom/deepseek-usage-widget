@@ -53,7 +53,7 @@ echo [ OK ] Dependencies installed
 :: ── Verify imports ──
 echo.
 echo [ .. ] Verifying package...
-%PY% -c "import sys; sys.path.insert(0, r'%~dp0'); from deepseek_usage_widget.widget import main; print('OK')"
+%PY% -c "import sys; sys.path.insert(0, r'%~dp0'); from run_widget import main; print('OK')"
 if %errorlevel% neq 0 (
     echo [FAIL] Package verification failed — check for syntax errors
     pause
@@ -76,7 +76,7 @@ echo.
     --distpath "%~dp0" ^
     --workpath "%~dp0build_temp" ^
     --specpath "%~dp0build_temp" ^
-    "%~dp0deepseek_usage_widget\widget.py"
+    "%~dp0run_widget.py"
 
 if %errorlevel% neq 0 (
     echo.
