@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Language**: 向用户汇报进度和结果时使用中文。代码、提交信息和技术标识符保持英文。
+
 ## Project
 
 DeepSeek Usage Widget — a Windows desktop Tkinter overlay that displays DeepSeek API usage, balance, and cost in real time. PyInstaller builds it into a standalone `DeepSeekWidget.exe`.
@@ -44,4 +46,8 @@ deepseek_usage_widget/
 
 **Config storage**: `~/.deepseek_widget/config.json` (API key DPAPI-encrypted) and `~/.deepseek_widget/daily.json` (usage history keyed by ISO8601 date).
 
-**API client**: Talks to `api.deepseek.com` (balance, usage) and `platform.deepseek.com` (CSV export download). Falls back to local ZIP files when offline.
+**API client**: Talks to `api.deepseek.com` (balance) and `platform.deepseek.com` (usage cost via `/api/v0/usage/cost`, needs `platformToken` from browser LocalStorage). Falls back to CSV/ZIP imports and local ZIP files when offline.
+
+## Rules
+
+- **Code Review Required**: 所有代码修改必须通过 code-reviewer agent review 后才能 commit。禁止跳过 review 直接提交。

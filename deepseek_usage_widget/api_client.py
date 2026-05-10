@@ -35,6 +35,7 @@ def _trim_cache():
 class DeepSeekAPI:
     def __init__(self, config):
         self.api_key = config.get("api_key", "")
+        self.platform_token = config.get("platform_token", "")
         self.base_url = config.get("base_url", "https://api.deepseek.com").rstrip("/")
         self.platform_url = config.get("platform_url", "https://platform.deepseek.com").rstrip("/")
         self.session = requests.Session()
@@ -43,6 +44,14 @@ class DeepSeekAPI:
         return {
             "Authorization": f"Bearer {self.api_key}",
             "Accept": "application/json",
+        }
+
+    def _platform_headers(self):
+        return {
+            "Authorization": f"Bearer {self.platform_token}",
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/132.0.0.0 Safari/537.36",
+            "Referer": f"{self.platform_url}/usage",
         }
 
     def get_balance(self):
@@ -69,6 +78,34 @@ class DeepSeekAPI:
         resp = self.session.get(url, headers=self._headers(), params=params, timeout=15)
         resp.raise_for_status()
         return resp.json()
+
+    def get_platform_usage(self, target_date=None):
+        """
+        通过 platform.deepseek.com 内部 API 获取月用量数据。
+        需要 platform_token（浏览器 LocalStorage → userToken）。
+        返回 _aggregate_platform_cost 的聚合结果，或 None。
+        """
+        if not self.platform_token:
+            return None
+
+        if target_date is None:
+            target_date = date.today()
+        ds = target_date.isoformat() if isinstance(target_date, date) else str(target_date)
+        y, m = ds[:4], ds[5:7]
+
+        url = f"{self.platform_url}/api/v0/usage/cost?month={m}&year={y}"
+        try:
+            resp = self.session.get(url, headers=self._platform_headers(), timeout=30)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("code") == 0 and data.get("data"):
+                    return _aggregate_platform_cost(data["data"], target_date)
+                logger.warning("平台 API 返回异常: code=%s msg=%s", data.get("code"), data.get("msg"))
+            else:
+                logger.warning("平台 API HTTP %s: %s", resp.status_code, url)
+        except requests.RequestException as e:
+            logger.warning("平台 API 请求失败: %s — %s", url, e)
+        return None
 
     def get_usage_csv(self, target_date=None):
         """
@@ -169,6 +206,9 @@ class DeepSeekAPI:
 
     def update_key(self, new_key):
         self.api_key = new_key
+
+    def update_platform_token(self, new_token):
+        self.platform_token = new_token
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -319,6 +359,104 @@ def _parse_deepseek_csv(amount_text, cost_text="", target_date=None):
         "month_input": month_input,
         "month_output": month_output,
         "month_cache_hit": month_cache_hit,
+        "month_calls": month_calls,
+        "month_cost": month_cost,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+#  平台 API 响应解析
+# ═══════════════════════════════════════════════════════════════
+
+def _aggregate_platform_cost(data, target_date=None):
+    """
+    解析 platform.deepseek.com /api/v0/usage/cost 返回的 JSON 数据。
+    data 可能是 list（每日记录）或 dict（含 daily_costs 等字段）。
+    """
+    if target_date is None:
+        target_date = date.today().isoformat()
+    elif isinstance(target_date, date):
+        target_date = target_date.isoformat()
+
+    # 提取每日记录列表
+    records = []
+    if isinstance(data, list):
+        records = data
+    elif isinstance(data, dict):
+        records = data.get("daily_costs") or data.get("costs") or data.get("items") or []
+        if not records and "cost" in data:
+            records = [data]
+    if not records:
+        logger.warning("平台 API 返回数据格式无法识别: %s", type(data).__name__)
+        return None
+
+    total_cost = 0.0
+    total_calls = 0
+    daily_history = []
+    by_model = {}
+    all_dates = []
+    month_cost = 0.0
+    month_calls = 0
+
+    for r in records:
+        d = (r.get("date") or r.get("utc_date") or r.get("day", "")).strip()
+        cost_raw = r.get("cost")
+        if cost_raw is None:
+            cost_raw = r.get("total_cost")
+        if cost_raw is None:
+            cost_raw = r.get("amount", 0)
+        cost = float(cost_raw or 0)
+        calls = int(r.get("calls") or r.get("request_count") or r.get("api_calls") or 0)
+
+        if not d:
+            continue
+
+        all_dates.append(d)
+        month_cost += cost
+        month_calls += calls
+
+        daily_history.append({
+            "date": d,
+            "tokens": 0,  # platform cost API 通常不含 token 数
+            "cost": cost,
+            "calls": calls,
+        })
+
+        # 按模型拆分可能嵌套在 models / details 字段中
+        model_items = r.get("models") or r.get("details") or r.get("breakdown") or []
+        if isinstance(model_items, dict):
+            model_items = [{"model": k, **v} for k, v in model_items.items()]
+        for mi in model_items:
+            model = mi.get("model") or mi.get("model_name") or "unknown"
+            mcost = float(mi.get("cost") or mi.get("amount") or 0)
+            mcalls = int(mi.get("calls") or mi.get("request_count") or 0)
+            if model not in by_model:
+                by_model[model] = {"input": 0, "output": 0, "cache_hit": 0, "calls": 0, "cost": 0.0}
+            by_model[model]["cost"] += mcost
+            by_model[model]["calls"] += mcalls
+
+    if not all_dates:
+        logger.warning("平台 API 返回数据无日期字段")
+        return None
+
+    all_dates.sort()
+    latest_date = all_dates[-1]
+    selected_date = target_date if target_date in all_dates else latest_date
+
+    selected_cost = sum(item["cost"] for item in daily_history if item["date"] == selected_date)
+
+    return {
+        "total_input": 0,
+        "total_output": 0,
+        "total_calls": month_calls,
+        "total_cost": selected_cost,
+        "by_model": by_model,
+        "selected_date": selected_date,
+        "latest_date": latest_date,
+        "daily_history": daily_history,
+        "month_input": 0,
+        "month_output": 0,
+        "month_cache_hit": 0,
         "month_calls": month_calls,
         "month_cost": month_cost,
     }

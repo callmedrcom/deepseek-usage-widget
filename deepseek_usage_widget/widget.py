@@ -43,7 +43,7 @@ class SettingsWindow(tk.Toplevel):
         self.resizable(False, False)
         self.transient(master)
 
-        w, h = 480, 520
+        w, h = 480, 620
         x = master.winfo_x() + (master.winfo_width() - w) // 2
         y = master.winfo_y() + (master.winfo_height() - h) // 2
         self.geometry(f"{w}x{h}+{x}+{y}")
@@ -65,12 +65,32 @@ class SettingsWindow(tk.Toplevel):
                                   insertbackground=THEME["fg"],
                                   font=_font(10, fixed=True), relief="flat", bd=8)
         self.key_entry.pack(side="left", fill="x", expand=True)
-        self._show_btn = tk.Button(key_frame, text="Show", width=5,
+        self._show_key_btn = tk.Button(key_frame, text="Show", width=5,
                                    bg=THEME["surface0"], fg=THEME["fg"],
                                    relief="flat", cursor="hand2", bd=0,
                                    font=_font(9),
                                    command=self._toggle_key_visibility)
-        self._show_btn.pack(side="right", padx=(4, 0))
+        self._show_key_btn.pack(side="right", padx=(4, 0))
+
+        # Platform Token
+        self._section("Platform Token（用量数据拉取）")
+        pt_frame = tk.Frame(self, bg=THEME["bg"])
+        pt_frame.pack(fill="x", padx=18, pady=(0, 6))
+        self.pt_var = tk.StringVar(master=root, value=self.config.get("platform_token", ""))
+        self.pt_entry = tk.Entry(pt_frame, textvariable=self.pt_var, show="*",
+                                 bg=THEME["card"], fg=THEME["fg"],
+                                 insertbackground=THEME["fg"],
+                                 font=_font(10, fixed=True), relief="flat", bd=8)
+        self.pt_entry.pack(side="left", fill="x", expand=True)
+        self._show_pt_btn = tk.Button(pt_frame, text="Show", width=5,
+                                   bg=THEME["surface0"], fg=THEME["fg"],
+                                   relief="flat", cursor="hand2", bd=0,
+                                   font=_font(9),
+                                   command=self._toggle_pt_visibility)
+        self._show_pt_btn.pack(side="right", padx=(4, 0))
+        tk.Label(self, text="  获取: F12 → Application → Local Storage → 复制 userToken 值",
+                 bg=THEME["bg"], fg=THEME["dim"], font=_font(8), justify="left"
+                 ).pack(anchor="w", padx=18, pady=(0, 4))
 
         # 刷新间隔
         self._section("刷新间隔（秒）")
@@ -133,13 +153,22 @@ class SettingsWindow(tk.Toplevel):
     def _toggle_key_visibility(self):
         if self.key_entry.cget("show") == "*":
             self.key_entry.configure(show="")
-            self._show_btn.configure(text="Hide")
+            self._show_key_btn.configure(text="Hide")
         else:
             self.key_entry.configure(show="*")
-            self._show_btn.configure(text="Show")
+            self._show_key_btn.configure(text="Show")
+
+    def _toggle_pt_visibility(self):
+        if self.pt_entry.cget("show") == "*":
+            self.pt_entry.configure(show="")
+            self._show_pt_btn.configure(text="Hide")
+        else:
+            self.pt_entry.configure(show="*")
+            self._show_pt_btn.configure(text="Show")
 
     def _save(self):
         self.config["api_key"] = self.key_var.get().strip()
+        self.config["platform_token"] = self.pt_var.get().strip()
         self.config["refresh_interval"] = self.interval_var.get()
         self.config["opacity"] = self.opacity_var.get()
         self.config["default_model"] = self.model_var.get()
@@ -247,92 +276,103 @@ class DeepSeekWidget(tk.Tk):
     # ── UI 构建 ───────────────────────────────────────────
     def _build_ui(self):
         shell = tk.Frame(self, bg=THEME["bg"])
-        shell.pack(fill="both", expand=True, padx=12, pady=12)
+        shell.pack(fill="both", expand=True, padx=8, pady=8)
 
         left_shell = self._panel_shell(shell)
-        left_shell.pack(side="left", fill="both", expand=True, padx=(0, 8))
+        left_shell.pack(side="left", fill="both", expand=True, padx=(0, 4))
         self.left_panel = left_shell.body
         right_shell = self._panel_shell(shell)
-        right_shell.pack(side="left", fill="both", expand=True, padx=(8, 0))
+        right_shell.pack(side="left", fill="both", expand=True, padx=(4, 0))
         self.right_panel = right_shell.body
 
         self._build_left_panel()
         self._build_right_panel()
 
     def _build_left_panel(self):
-        header = tk.Frame(self.left_panel, bg=THEME["shell"], padx=14, pady=10)
+        # ── 标题栏（Apple 风格：与面板同色，左品牌右操作）──
+        header = tk.Frame(self.left_panel, bg=THEME["panel"], padx=16, pady=10)
         header.pack(fill="x")
-        brand = tk.Frame(header, bg=THEME["shell"])
+
+        brand = tk.Frame(header, bg=THEME["panel"])
         brand.pack(side="left")
+
         if self._brand_logo is not None:
             logo = tk.Label(brand, image=self._brand_logo,
-                            bg=THEME["shell"], bd=0)
+                            bg=THEME["panel"], bd=0)
         else:
             logo = tk.Label(brand, text="◈",
-                            bg=THEME["surface0"], fg=THEME["accent_2"],
-                            font=_font(11, bold=True), width=2)
+                            bg=THEME["accent"], fg="#FFFFFF",
+                            font=_font(11, bold=True), width=2, pady=2)
         logo.pack(side="left", padx=(0, 10))
-        title_box = tk.Frame(brand, bg=THEME["shell"])
+
+        title_box = tk.Frame(brand, bg=THEME["panel"])
         title_box.pack(side="left")
         tk.Label(title_box, text="DeepSeek Monitor",
-                 bg=THEME["shell"], fg=THEME["fg"],
+                 bg=THEME["panel"], fg=THEME["fg"],
                  font=_font(13, bold=True)).pack(anchor="w")
         tk.Label(title_box, text="实时仪表盘",
-                 bg=THEME["shell"], fg=THEME["muted"],
+                 bg=THEME["panel"], fg=THEME["dim"],
                  font=_font(8)).pack(anchor="w")
 
-        actions = tk.Frame(header, bg=THEME["shell"])
+        actions = tk.Frame(header, bg=THEME["panel"])
         actions.pack(side="right")
         action_items = [
-            ("↻", self._schedule_refresh, "立即刷新"),
-            ("⚙", self._open_settings, "打开设置"),
-            ("×", self._on_close, "关闭窗口"),
+            ("↻", self._schedule_refresh, "立即刷新", THEME["surface0"], THEME["dim"]),
+            ("⚙", self._open_settings, "打开设置", THEME["surface0"], THEME["dim"]),
+            ("×", self._on_close, "关闭窗口", THEME["red"], "#FFFFFF"),
         ]
         self.action_buttons = []
-        for text, command, tooltip in action_items:
+        for text, command, tooltip, bg, fg in action_items:
             chip = tk.Button(actions, text=text,
                              command=command,
-                             bg=THEME["surface0"], fg=THEME["muted"],
-                             activebackground=THEME["surface1"], activeforeground=THEME["fg"],
+                             bg=bg, fg=fg,
+                             activebackground=THEME["surface1"],
+                             activeforeground=THEME["fg"],
                              relief="flat", bd=0, cursor="hand2",
-                             font=_font(9, bold=True), width=2)
+                             font=_font(10, bold=True), width=2)
             chip._skip_drag_binding = True
             chip._tooltip_text = tooltip
             chip.pack(side="left", padx=3)
             self.action_buttons.append(chip)
 
-        summary = self._card(self.left_panel, pady=12)
+        # 分割线
+        tk.Frame(self.left_panel, bg=THEME["panel_edge"], height=1).pack(fill="x")
+
+        summary = self._card(self.left_panel, pady=16)
         summary.pack(fill="x", padx=12, pady=(10, 10))
         top = tk.Frame(summary.body, bg=THEME["card"])
-        top.pack(fill="x", padx=14)
+        top.pack(fill="x", padx=16)
 
         balance_col = tk.Frame(top, bg=THEME["card"])
         balance_col.pack(side="left", fill="x", expand=True)
-        self._card_kicker(balance_col, "账户余额", THEME["accent"])
+        self._card_kicker(balance_col, "账户余额", THEME["dim"])
         self.lbl_balance = tk.Label(balance_col, text="--",
-                                    bg=THEME["card"], fg=THEME["accent"],
-                                    font=_font(22, bold=True))
+                                    bg=THEME["card"], fg=THEME["green"],
+                                    font=_font(24, bold=True))
         self.lbl_balance.pack(anchor="w")
         self.lbl_balance_detail = tk.Label(balance_col, text="",
-                                           bg=THEME["card"], fg=THEME["green"],
+                                           bg=THEME["card"], fg=THEME["dim"],
                                            font=_font(9))
-        self.lbl_balance_detail.pack(anchor="w", pady=(4, 0))
+        self.lbl_balance_detail.pack(anchor="w", pady=(3, 0))
+
+        # 垂直分割线
+        tk.Frame(top, bg=THEME["panel_edge"], width=1).pack(side="left", fill="y", padx=16, pady=4)
 
         cost_col = tk.Frame(top, bg=THEME["card"])
         cost_col.pack(side="left", fill="x", expand=True)
-        self._card_kicker(cost_col, "本月消费", THEME["yellow"])
+        self._card_kicker(cost_col, "本月消费", THEME["dim"])
         self.lbl_cost = tk.Label(cost_col, text="--",
                                  bg=THEME["card"], fg=THEME["yellow"],
-                                 font=_font(22, bold=True))
+                                 font=_font(24, bold=True))
         self.lbl_cost.pack(anchor="w")
         self.lbl_cost_sub = tk.Label(cost_col, text="",
                                      bg=THEME["card"], fg=THEME["dim"],
                                      font=_font(9))
-        self.lbl_cost_sub.pack(anchor="w", pady=(4, 0))
+        self.lbl_cost_sub.pack(anchor="w", pady=(3, 0))
 
         self.model_cards = []
         for _ in range(2):
-            card = self._card(self.left_panel, pady=10)
+            card = self._card(self.left_panel, pady=12)
             card.pack(fill="x", padx=12, pady=(0, 8))
             self.model_cards.append(self._build_model_card(card))
 
@@ -346,7 +386,9 @@ class DeepSeekWidget(tk.Tk):
         header_row.pack(fill="x", padx=14)
         title_group = tk.Frame(header_row, bg=THEME["card"])
         title_group.pack(side="left")
-        self._card_kicker(title_group, "消费趋势", THEME["accent"])
+        tk.Label(title_group, text="消费趋势",
+                 bg=THEME["card"], fg=THEME["fg"],
+                 font=_font(11, bold=True)).pack(anchor="w")
         self.lbl_month_tokens = tk.Label(header_row, text="",
                                          bg=THEME["card"], fg=THEME["dim"],
                                          font=_font(9))
@@ -356,14 +398,17 @@ class DeepSeekWidget(tk.Tk):
         self.left_chart.pack(fill="x", padx=12, pady=(8, 4))
 
     def _build_right_panel(self):
+        # 分割线（与左侧对齐）
+        tk.Frame(self.right_panel, bg=THEME["panel_edge"], height=1).pack(fill="x")
+
         toolbar = tk.Frame(self.right_panel, bg=THEME["panel"])
-        toolbar.pack(fill="x", padx=14, pady=(12, 4))
+        toolbar.pack(fill="x", padx=16, pady=(12, 6))
         tk.Label(toolbar, text="运行概览",
                  bg=THEME["panel"], fg=THEME["fg"],
-                 font=_font(11, bold=True)).pack(side="left")
+                 font=_font(13, bold=True)).pack(side="left")
         tk.Label(toolbar, text="近 7 日",
                  bg=THEME["panel"], fg=THEME["dim"],
-                 font=_font(8)).pack(side="right")
+                 font=_font(9)).pack(side="right", anchor="s")
 
         top_row = tk.Frame(self.right_panel, bg=THEME["panel"])
         top_row.pack(fill="x", padx=12, pady=(0, 6))
@@ -409,78 +454,75 @@ class DeepSeekWidget(tk.Tk):
         self.lbl_status.pack(fill="x", pady=(4, 0))
 
     def _panel_shell(self, parent):
-        outer = tk.Frame(parent, bg=THEME["shadow"], padx=2, pady=2)
-        edge = tk.Frame(outer, bg=THEME["shell"], padx=2, pady=2)
-        edge.pack(fill="both", expand=True)
-        body = tk.Frame(edge, bg=THEME["panel"], highlightbackground=THEME["panel_edge"], highlightthickness=1)
+        outer = tk.Frame(parent, bg=THEME["panel_edge"], padx=1, pady=1)
+        body = tk.Frame(outer, bg=THEME["panel"])
         body.pack(fill="both", expand=True)
         outer.body = body
         return outer
 
     def _card(self, parent, pady=10):
-        outer = tk.Frame(parent, bg=THEME["shadow"], padx=1, pady=1)
-        edge = tk.Frame(outer, bg=THEME["card_edge"], padx=1, pady=1)
-        edge.pack(fill="both", expand=True)
-        body = tk.Frame(edge, bg=THEME["card"], padx=0, pady=pady)
+        outer = tk.Frame(parent, bg=THEME["card_edge"], padx=1, pady=1)
+        body = tk.Frame(outer, bg=THEME["card"], padx=0, pady=pady)
         body.pack(fill="both", expand=True)
         outer.body = body
         return outer
 
     def _card_kicker(self, parent, text, color):
         tk.Label(parent, text=text,
-                 bg=THEME["card"], fg=color,
-                 font=_font(9, bold=True)).pack(anchor="w", pady=(0, 4))
+                 bg=THEME["card"], fg=THEME["dim"],
+                 font=_font(9)).pack(anchor="w", pady=(0, 2))
 
     def _build_stat_card(self, parent, title):
-        frame = self._card(parent, pady=10)
+        frame = self._card(parent, pady=14)
         head = tk.Frame(frame.body, bg=THEME["card"])
-        head.pack(fill="x", padx=14, pady=(0, 6))
+        head.pack(fill="x", padx=16, pady=(0, 6))
         tk.Label(head, text="●",
                  bg=THEME["card"], fg=THEME["accent"],
-                 font=_font(8, bold=True)).pack(side="left")
+                 font=_font(7)).pack(side="left")
         tk.Label(head, text=title,
-                 bg=THEME["card"], fg=THEME["muted"],
-                 font=_font(9, bold=True)).pack(side="left", padx=(5, 0))
+                 bg=THEME["card"], fg=THEME["dim"],
+                 font=_font(9)).pack(side="left", padx=(5, 0))
         value = tk.Label(frame.body, text="--",
-                         bg=THEME["card"], fg=THEME["accent"],
-                         font=_font(19, bold=True))
-        value.pack(anchor="w", padx=14, pady=(0, 1))
+                         bg=THEME["card"], fg=THEME["fg"],
+                         font=_font(21, bold=True))
+        value.pack(anchor="w", padx=16, pady=(0, 1))
         sub = tk.Label(frame.body, text="",
                        bg=THEME["card"], fg=THEME["dim"],
                        font=_font(9))
-        sub.pack(anchor="w", padx=14, pady=(4, 0))
+        sub.pack(anchor="w", padx=16, pady=(3, 0))
         return {"frame": frame, "value": value, "sub": sub}
 
     def _build_model_card(self, parent):
         top = tk.Frame(parent.body, bg=THEME["card"])
-        top.pack(fill="x", padx=12)
+        top.pack(fill="x", padx=14)
         icon = tk.Label(top, text="⚡",
                         bg=THEME["surface0"], fg=THEME["accent"],
-                        width=2, font=_font(10, bold=True))
+                        width=2, font=_font(11, bold=True),
+                        pady=3)
         icon.pack(side="left", pady=(2, 0))
         title_box = tk.Frame(top, bg=THEME["card"])
-        title_box.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        title_box.pack(side="left", fill="x", expand=True, padx=(10, 0))
         title = tk.Label(title_box, text="--",
                          bg=THEME["card"], fg=THEME["fg"],
-                         font=_font(12, bold=True))
+                         font=_font(13, bold=True))
         title.pack(anchor="w")
         meta = tk.Label(title_box, text="",
                         bg=THEME["card"], fg=THEME["dim"],
-                        font=_font(8))
+                        font=_font(9))
         meta.pack(anchor="w", pady=(1, 0))
         value = tk.Label(top, text="--",
-                         bg=THEME["card"], fg=THEME["fg"],
-                         font=_font(11, bold=True), justify="right")
+                         bg=THEME["card"], fg=THEME["yellow"],
+                         font=_font(13, bold=True), justify="right")
         value.pack(side="right", padx=(8, 0))
 
-        bar_canvas = tk.Canvas(parent.body, bg=THEME["card"], height=8,
+        bar_canvas = tk.Canvas(parent.body, bg=THEME["card"], height=6,
                        highlightthickness=0, bd=0)
-        bar_canvas.pack(fill="x", padx=12, pady=(9, 4))
+        bar_canvas.pack(fill="x", padx=14, pady=(10, 4))
 
         foot = tk.Label(parent.body, text="",
-                        bg=THEME["card"], fg=THEME["muted"],
+                        bg=THEME["card"], fg=THEME["dim"],
                         font=_font(8))
-        foot.pack(anchor="w", padx=12, pady=(1, 0))
+        foot.pack(anchor="w", padx=14, pady=(1, 0))
         return {
             "icon": icon,
             "title": title,
@@ -694,6 +736,17 @@ class DeepSeekWidget(tk.Tk):
 
                     if not got_usage:
                         try:
+                            plat = self.api.get_platform_usage()
+                            if plat and (plat.get("total_calls", 0) > 0 or plat.get("total_cost", 0) > 0):
+                                usage_data = _build_snapshot(plat)
+                                got_usage = True
+                            else:
+                                errors.append("平台API: 返回空数据")
+                        except Exception as e:
+                            errors.append(f"平台API: {_api_error_msg(e)}")
+
+                    if not got_usage:
+                        try:
                             csv_result = self.api.get_usage_csv()
                             if csv_result and (csv_result.get("total_calls", 0) > 0 or csv_result.get("total_cost", 0) > 0):
                                 usage_data = _build_snapshot(csv_result)
@@ -804,7 +857,7 @@ class DeepSeekWidget(tk.Tk):
                 topped = b.get("topped_up_balance", "0")
                 self.lbl_balance.config(
                     text=f"{sym}{total:,.2f}",
-                    fg=THEME["accent"] if total > 0 else THEME["red"])
+                    fg=THEME["green"] if total > 0 else THEME["red"])
                 self.lbl_balance_detail.config(
                     text=f"账户可用  赠送 {sym}{granted}  充值 {sym}{topped}")
             else:
@@ -1061,7 +1114,8 @@ class DeepSeekWidget(tk.Tk):
 
         for step in range(4):
             y = top_pad + int((usable_h / 3) * step)
-            canvas.create_line(left_pad, y, width - right_pad, y, fill=THEME["grid"])
+            canvas.create_line(left_pad, y, width - right_pad, y,
+                               fill=THEME["grid"], dash=(2, 4))
 
         for idx, item in enumerate(history):
             value = values[idx]
@@ -1078,7 +1132,7 @@ class DeepSeekWidget(tk.Tk):
                                text=_chart_date(item["date"]),
                                fill=THEME["dim"], font=_font(8))
             canvas.create_text((x0 + x1) / 2, value_y,
-                               text=self._format_axis_value(value),
+                               text=self._format_axis_value(value, metric),
                                fill=THEME["muted"], font=_font(8))
 
         canvas.create_line(left_pad, top_pad + usable_h, width - right_pad, top_pad + usable_h,
@@ -1114,7 +1168,13 @@ class DeepSeekWidget(tk.Tk):
         canvas.create_oval(x0, y1 - radius * 2, x0 + radius * 2, y1, fill=color, outline=color, stipple=stipple)
         canvas.create_oval(x1 - radius * 2, y1 - radius * 2, x1, y1, fill=color, outline=color, stipple=stipple)
 
-    def _format_axis_value(self, value):
+    def _format_axis_value(self, value, metric="tokens"):
+        if metric == "cost":
+            if value >= 1000:
+                return f"¥{value / 1000:.1f}K"
+            if value >= 1:
+                return f"¥{value:.2f}"
+            return f"¥{value:.4f}"
         if value >= 1_000_000:
             return f"{value / 1_000_000:.2f}M"
         if value >= 1_000:
@@ -1177,6 +1237,7 @@ class DeepSeekWidget(tk.Tk):
         self._settings_window = None
         self.config = load_config()
         self.api.update_key(self.config["api_key"])
+        self.api.update_platform_token(self.config.get("platform_token", ""))
         self.attributes("-alpha", self.config.get("opacity", 0.90))
         self.refresh_interval_ms = self.config.get("refresh_interval", 60) * 1000
         if self._refresh_job_id:

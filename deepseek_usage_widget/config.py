@@ -12,12 +12,13 @@ def load_config():
         for k, v in DEFAULT_CONFIG.items():
             if k not in cfg:
                 cfg[k] = v
-        if cfg.get("api_key"):
-            try:
-                cfg["api_key"] = decrypt(cfg["api_key"])
-            except Exception:
-                logger.warning("API Key 解密失败，可能需要重新输入")
-                cfg["api_key"] = ""
+        for key in ("api_key", "platform_token"):
+            if cfg.get(key):
+                try:
+                    cfg[key] = decrypt(cfg[key])
+                except Exception:
+                    logger.warning("%s 解密失败，可能需要重新输入", key)
+                    cfg[key] = ""
         return cfg
     save_config(DEFAULT_CONFIG)
     return dict(DEFAULT_CONFIG)
@@ -25,8 +26,9 @@ def load_config():
 def save_config(cfg):
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     to_save = dict(cfg)
-    if to_save.get("api_key"):
-        to_save["api_key"] = encrypt(to_save["api_key"])
+    for key in ("api_key", "platform_token"):
+        if to_save.get(key):
+            to_save[key] = encrypt(to_save[key])
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(to_save, f, indent=2, ensure_ascii=False)
 

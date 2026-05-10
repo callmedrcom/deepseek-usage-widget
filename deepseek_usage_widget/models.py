@@ -33,35 +33,36 @@ DEFAULT_CONFIG = {
     "default_model": "deepseek-chat",
     "base_url": "https://api.deepseek.com",
     "platform_url": "https://platform.deepseek.com",
+    "platform_token": "",
 }
 
 
-# ── UI 颜色主题（深色主题）──────────────────────────────────
+# ── UI 颜色主题（Apple 暗色风格）──────────────────────────────
 THEME = {
-    "bg":       "#99a3b2",
-    "panel":    "#23272d",
-    "shell":    "#c5ccd6",
-    "panel_edge": "#eef2f7",
-    "card":     "#15181d",
-    "card_edge": "#323840",
-    "surface0": "#20252c",
-    "surface1": "#2b313a",
-    "fg":       "#f5f7fb",
-    "muted":    "#c4ccd8",
-    "dim":      "#96a1af",
-    "accent":   "#82a0ff",
-    "accent_2": "#9c8cff",
-    "green":    "#63d29c",
-    "yellow":   "#ffbf5f",
-    "red":      "#ff8b81",
-    "bar_bg":   "#252b33",
-    "bar_in":   "#7ea6ff",
-    "bar_out":  "#7ad0ff",
-    "bar_cache": "#c09aff",
-    "grid":     "#313744",
-    "shadow":   "#8d97a5",
-    "highlight": "#dbe5ff",
-    "mono_bar": "#82a0ff",
+    "bg":        "#141416",   # 窗口底色（边框效果）
+    "panel":     "#1C1C1E",   # 面板主色（Apple systemBackground）
+    "shell":     "#1C1C1E",   # 与面板统一
+    "panel_edge":"#38383A",   # 分割线 / 边框色
+    "card":      "#2C2C2E",   # 卡片背景（Apple secondarySystemBackground）
+    "card_edge": "#3A3A3C",   # 卡片边框
+    "surface0":  "#3A3A3C",   # 三级表面
+    "surface1":  "#48484A",   # 四级表面
+    "fg":        "#FFFFFF",   # 主要文字
+    "muted":     "#EBEBF5",   # 次要文字（苹果 label2）
+    "dim":       "#8E8E93",   # 辅助文字（苹果 placeholderText）
+    "accent":    "#0A84FF",   # Apple 蓝
+    "accent_2":  "#5E5CE6",   # Apple 靛蓝
+    "green":     "#30D158",   # Apple 绿
+    "yellow":    "#FF9F0A",   # Apple 橙黄
+    "red":       "#FF453A",   # Apple 红
+    "bar_bg":    "#3A3A3C",
+    "bar_in":    "#0A84FF",
+    "bar_out":   "#30D158",
+    "bar_cache": "#5E5CE6",
+    "grid":      "#2C2C2E",
+    "shadow":    "#000000",
+    "highlight": "#FFFFFF",
+    "mono_bar":  "#0A84FF",
 }
 
 
