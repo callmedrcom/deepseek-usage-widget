@@ -13,7 +13,7 @@ echo.
 :: Check Python
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [FAIL] Python not found. Install Python 3.8+ from:
+    echo [FAIL] Python not found. Install Python 3.10+ from:
     echo        https://www.python.org/downloads/
     goto end
 )

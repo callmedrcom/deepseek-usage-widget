@@ -17,6 +17,29 @@ from .models import logger, CSV_CACHE_DIR
 
 MAX_CACHE_FILES = 100
 
+# ── 平台 API 单价表 (CNY / 百万 tokens) ────────────────────────
+# 用于从费用反推 token 数量（估算）。价格以 2026-04-26 调整后为准。
+_PLATFORM_PRICING = {
+    "deepseek-chat":     {"cache_hit": 0.02, "cache_miss": 1.0,  "output": 2.0},
+    "deepseek-v4-flash": {"cache_hit": 0.02, "cache_miss": 1.0,  "output": 2.0},
+    "deepseek-v4-pro":   {"cache_hit": 0.025,"cache_miss": 3.0,  "output": 6.0},
+    "deepseek-reasoner": {"cache_hit": 0.04, "cache_miss": 4.0,  "output": 16.0},
+    "deepseek-r1":       {"cache_hit": 0.04, "cache_miss": 4.0,  "output": 16.0},
+    "deepseek-v3":       {"cache_hit": 0.02, "cache_miss": 1.0,  "output": 2.0},
+}
+_DEFAULT_PLATFORM_PRICING = {"cache_hit": 0.1, "cache_miss": 2.0, "output": 4.0}
+
+
+def _cost_to_tokens(cache_hit_cost, cache_miss_cost, output_cost, pricing):
+    """根据费用和单价反推 token 数量（整数估算）。"""
+    ch_p  = pricing.get("cache_hit",  _DEFAULT_PLATFORM_PRICING["cache_hit"])
+    cm_p  = pricing.get("cache_miss", _DEFAULT_PLATFORM_PRICING["cache_miss"])
+    out_p = pricing.get("output",     _DEFAULT_PLATFORM_PRICING["output"])
+    ch_tokens  = int(cache_hit_cost  * 1_000_000 / ch_p)  if ch_p  > 0 else 0
+    cm_tokens  = int(cache_miss_cost * 1_000_000 / cm_p)  if cm_p  > 0 else 0
+    out_tokens = int(output_cost     * 1_000_000 / out_p) if out_p > 0 else 0
+    return ch_tokens, cm_tokens, out_tokens
+
 
 def _trim_cache():
     """保持 CSV_CACHE_DIR 下最多 MAX_CACHE_FILES 个文件，按修改时间删除最早的。"""
@@ -109,99 +132,118 @@ class DeepSeekAPI:
 
     def get_usage_csv(self, target_date=None):
         """
-        从 DeepSeek 平台下载用量 CSV 导出 ZIP。
-        先尝试下载最新数据；下载失败时才回退到缓存。
+        从 platform.deepseek.com 下载月度用量 ZIP。
+        先尝试各端点下载；失败时回退到缓存文件。
         返回 _parse_deepseek_csv 的聚合结果，或 None。
         """
         if target_date is None:
             target_date = date.today()
         ds = target_date.isoformat() if isinstance(target_date, date) else str(target_date)
-        ym = ds[:7]  # "2026-05"
+        ym = ds[:7]   # "2026-05"
+        y, m = ds[:4], ds[5:7]
 
         CSV_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-        # ── 端点列表 ──
-        endpoints = [
-            ("GET", f"{self.platform_url}/api/usage/export?year_month={ym}"),
-            ("GET", f"{self.platform_url}/api/usage/download?year_month={ym}"),
-            ("GET", f"{self.platform_url}/api/billing/usage/export?year_month={ym}"),
-            ("POST", f"{self.platform_url}/api/usage/export",
-             {"year_month": ym}),
-            ("POST", f"{self.platform_url}/api/billing/export",
-             {"year_month": ym, "format": "csv"}),
-            ("GET", f"{self.base_url}/v1/usage/export?year_month={ym}"),
-            ("GET", f"{self.base_url}/billing/usage/export?year_month={ym}"),
+        # ── 平台端点（使用 platform_token）──
+        # 按成功率从高到低排列；实际接口地址通过抓包确认后放首位
+        platform_endpoints = [
+            ("GET",  f"{self.platform_url}/api/v0/usage/export?month={m}&year={y}"),
+            ("GET",  f"{self.platform_url}/api/v0/usage/download?month={m}&year={y}"),
+            ("POST", f"{self.platform_url}/api/v0/usage/export",
+             {"month": int(m), "year": int(y)}),
+            ("GET",  f"{self.platform_url}/api/usage/export?year_month={ym}"),
+            ("GET",  f"{self.platform_url}/api/usage/download?year_month={ym}"),
+            ("GET",  f"{self.platform_url}/api/billing/usage/export?year_month={ym}"),
+            ("POST", f"{self.platform_url}/api/usage/export", {"year_month": ym}),
+        ]
+        # ── API 端点（使用 api_key）──
+        api_endpoints = [
+            ("GET",  f"{self.base_url}/v1/usage/export?year_month={ym}"),
+            ("GET",  f"{self.base_url}/billing/usage/export?year_month={ym}"),
         ]
 
-        # ── 1. 先尝试下载 ──
-        last_status = None
-        for endpoint in endpoints:
-            method = endpoint[0]
-            url = endpoint[1]
-            body = endpoint[2] if len(endpoint) > 2 else None
-            try:
-                if method == "GET":
-                    resp = self.session.get(url, headers=self._headers(), timeout=30)
-                else:
-                    resp = self.session.post(url, headers=self._headers(),
-                                             json=body, timeout=30)
+        def _try_endpoints(endpoints, use_platform_headers):
+            headers = self._platform_headers() if use_platform_headers else self._headers()
+            last_status = None
+            for endpoint in endpoints:
+                method = endpoint[0]
+                url = endpoint[1]
+                body = endpoint[2] if len(endpoint) > 2 else None
+                try:
+                    if method == "GET":
+                        resp = self.session.get(url, headers=headers, timeout=30)
+                    else:
+                        resp = self.session.post(url, headers=headers, json=body, timeout=30)
 
-                if resp.status_code == 200:
-                    ct = resp.headers.get("content-type", "")
-                    if "zip" in ct or "octet-stream" in ct or resp.content[:2] == b"PK":
-                        logger.info("CSV 下载成功: %s %s", method, url)
-                        now = datetime.now().strftime("%d_%H%M%S")
-                        cache_file = CSV_CACHE_DIR / f"usage_{ym}_{now}.zip"
-                        try:
-                            with open(cache_file, "wb") as f:
-                                f.write(resp.content)
-                            _trim_cache()
-                        except Exception:
-                            logger.warning("缓存写入失败", exc_info=True)
-                        try:
-                            result = _parse_csv_zip(resp.content, target_date)
+                    if resp.status_code == 200:
+                        ct = resp.headers.get("content-type", "")
+                        if "zip" in ct or "octet-stream" in ct or resp.content[:2] == b"PK":
+                            logger.info("ZIP 下载成功: %s %s", method, url)
+                            now_s = datetime.now().strftime("%d_%H%M%S")
+                            cache_file = CSV_CACHE_DIR / f"usage_{ym}_{now_s}.zip"
+                            try:
+                                with open(cache_file, "wb") as fh:
+                                    fh.write(resp.content)
+                                _trim_cache()
+                            except Exception:
+                                logger.warning("缓存写入失败", exc_info=True)
+                            try:
+                                result = _parse_csv_zip(resp.content, target_date)
+                                if result["total_calls"] > 0 or result["total_cost"] > 0:
+                                    return result
+                            except (ValueError, KeyError) as e:
+                                logger.warning("ZIP 解析失败: %s", e)
+                            continue
+                        if "csv" in ct or "text/csv" in ct:
+                            result = _parse_deepseek_csv(resp.text, "", target_date)
                             if result["total_calls"] > 0 or result["total_cost"] > 0:
                                 return result
-                        except (ValueError, KeyError) as e:
-                            logger.warning("ZIP 解析失败: %s %s — %s", method, url, e)
-                    if "csv" in ct or "text/csv" in ct:
-                        text = resp.text
-                        result = _parse_deepseek_csv(text, "", target_date)
-                        if result["total_calls"] > 0 or result["total_cost"] > 0:
-                            return result
-                    try:
-                        data = resp.json()
-                        agg = _aggregate_usage(data)
-                        if agg["total_calls"] > 0 or agg["total_cost"] > 0:
-                            return agg
-                    except (ValueError, KeyError, TypeError):
-                        pass
-                else:
-                    last_status = resp.status_code
-                    logger.warning("CSV 端点 HTTP %s: %s %s", resp.status_code, method, url)
-            except requests.RequestException as e:
-                logger.warning("CSV 请求失败: %s %s — %s", method, url, e)
-                continue
+                            continue
+                        try:
+                            data = resp.json()
+                            agg = _aggregate_usage(data)
+                            if agg["total_calls"] > 0 or agg["total_cost"] > 0:
+                                return agg
+                        except (ValueError, KeyError, TypeError):
+                            pass
+                    else:
+                        last_status = resp.status_code
+                        logger.debug("CSV 端点 HTTP %s: %s %s", resp.status_code, method, url)
+                except requests.RequestException as e:
+                    logger.debug("CSV 请求失败: %s %s — %s", method, url, e)
+            return last_status  # 无数据时返回最后 HTTP 状态码（int）或 None
 
-        # ── 2. 下载失败，回退缓存（取最新匹配文件）──
+        # ── 1. 先试平台端点（需要 platform_token）──
+        if self.platform_token:
+            r = _try_endpoints(platform_endpoints, use_platform_headers=True)
+            if isinstance(r, dict):
+                return r
+
+        # ── 2. 再试 API 端点 ──
+        r = _try_endpoints(api_endpoints, use_platform_headers=False)
+        if isinstance(r, dict):
+            return r
+
+        # ── 3. 回退缓存（取最新匹配文件）──
         prefix = f"usage_{ym}_"
-        candidates = sorted(
-            [p for p in CSV_CACHE_DIR.iterdir() if p.is_file() and p.name.startswith(prefix)],
-            key=lambda p: p.stat().st_mtime, reverse=True,
-        )
+        try:
+            candidates = sorted(
+                [p for p in CSV_CACHE_DIR.iterdir() if p.is_file() and p.name.startswith(prefix)],
+                key=lambda p: p.stat().st_mtime, reverse=True,
+            )
+        except Exception:
+            candidates = []
         if candidates:
-            cache_file = candidates[0]
-            logger.info("下载失败，回退缓存: %s", cache_file.name)
+            logger.info("下载失败，回退缓存: %s", candidates[0].name)
             try:
-                with open(cache_file, "rb") as f:
-                    result = _parse_csv_zip(f.read(), target_date)
+                with open(candidates[0], "rb") as fh:
+                    result = _parse_csv_zip(fh.read(), target_date)
                 if result["total_calls"] > 0 or result["total_cost"] > 0:
                     return result
             except Exception:
                 logger.warning("缓存损坏", exc_info=True)
 
-        logger.warning("所有 CSV 端点均失败%s",
-                       f", 最后状态码: {last_status}" if last_status else "")
+        logger.warning("所有 CSV 端点均失败，且无可用缓存")
         return None
 
     def update_key(self, new_key):
@@ -373,7 +415,7 @@ def _aggregate_platform_cost(data, target_date=None):
     解析 platform.deepseek.com /api/v0/usage/cost 返回的 JSON。
     实际结构: data.biz_data[0] = { total: [...], days: [{date, data: [...]}] }
     每日 data[] 中每项: {model, usage: [{type, amount}, ...]}
-    amount 为费用 (CNY)。
+    amount 为费用 (CNY)。token 数量通过单价反推（估算）。
     """
     if target_date is None:
         target_date = date.today().isoformat()
@@ -399,6 +441,12 @@ def _aggregate_platform_cost(data, target_date=None):
     daily_history = []
     by_model = {}
     month_cost = 0.0
+    month_input = 0
+    month_output = 0
+    month_cache_hit = 0
+
+    # 用于提取 selected_date 的 token 合计
+    daily_tokens = {}   # {date: {"input": int, "output": int, "cache_hit": int}}
 
     for day in days:
         d = day.get("date", "").strip()
@@ -406,25 +454,29 @@ def _aggregate_platform_cost(data, target_date=None):
             continue
 
         day_cost = 0.0
+        day_input = 0
+        day_output = 0
+        day_cache_hit = 0
+
         for entry in day.get("data", []):
             model = entry.get("model", "unknown")
+            pricing = _PLATFORM_PRICING.get(model, _DEFAULT_PLATFORM_PRICING)
             mc_cost = 0.0
-            mc_input = 0.0
-            mc_output = 0.0
-            mc_cache_hit = 0.0
+            mc_cache_hit_cost = 0.0
+            mc_cache_miss_cost = 0.0
+            mc_output_cost = 0.0
 
             for u in entry.get("usage", []):
                 amt = float(u.get("amount", 0))
                 t = u.get("type", "")
                 if t == "PROMPT_CACHE_HIT_TOKEN":
-                    mc_cache_hit += amt
-                    mc_input += amt
+                    mc_cache_hit_cost += amt
                 elif t == "PROMPT_CACHE_MISS_TOKEN":
-                    mc_input += amt
+                    mc_cache_miss_cost += amt
                 elif t == "RESPONSE_TOKEN":
-                    mc_output += amt
-                elif t == "PROMPT_TOKEN":
-                    mc_input += amt
+                    mc_output_cost += amt
+                elif t in ("PROMPT_TOKEN", "INPUT_TOKEN"):
+                    mc_cache_miss_cost += amt   # 无缓存 prompt 按 miss 算
                 mc_cost += amt
 
             day_cost += mc_cost
@@ -432,17 +484,31 @@ def _aggregate_platform_cost(data, target_date=None):
             if mc_cost <= 0:
                 continue
 
+            # 从费用反推 token 数（估算）
+            ch_tok, cm_tok, out_tok = _cost_to_tokens(
+                mc_cache_hit_cost, mc_cache_miss_cost, mc_output_cost, pricing
+            )
+            inp_tok = ch_tok + cm_tok
+
+            day_input += inp_tok
+            day_output += out_tok
+            day_cache_hit += ch_tok
+
             if model not in by_model:
                 by_model[model] = {"input": 0, "output": 0, "cache_hit": 0, "calls": 0, "cost": 0.0}
-            by_model[model]["input"] += mc_input
-            by_model[model]["output"] += mc_output
-            by_model[model]["cache_hit"] += mc_cache_hit
-            by_model[model]["cost"] += mc_cost
+            by_model[model]["input"]     += inp_tok
+            by_model[model]["output"]    += out_tok
+            by_model[model]["cache_hit"] += ch_tok
+            by_model[model]["cost"]      += mc_cost
 
-        month_cost += day_cost
+        month_cost      += day_cost
+        month_input     += day_input
+        month_output    += day_output
+        month_cache_hit += day_cache_hit
+        daily_tokens[d] = {"input": day_input, "output": day_output, "cache_hit": day_cache_hit}
         daily_history.append({
             "date": d,
-            "tokens": 0,
+            "tokens": day_input + day_output,
             "cost": day_cost,
             "calls": 0,
         })
@@ -451,21 +517,22 @@ def _aggregate_platform_cost(data, target_date=None):
     latest_date = all_dates[-1]
     selected_date = target_date if target_date in all_dates else latest_date
     selected_cost = sum(item["cost"] for item in daily_history if item["date"] == selected_date)
+    sel_tok = daily_tokens.get(selected_date, {"input": 0, "output": 0, "cache_hit": 0})
 
     return {
-        "total_input": 0,
-        "total_output": 0,
-        "total_calls": 0,
-        "total_cost": selected_cost,
-        "by_model": by_model,
-        "selected_date": selected_date,
-        "latest_date": latest_date,
-        "daily_history": daily_history,
-        "month_input": 0,
-        "month_output": 0,
-        "month_cache_hit": 0,
-        "month_calls": 0,
-        "month_cost": month_cost,
+        "total_input":    sel_tok["input"],
+        "total_output":   sel_tok["output"],
+        "total_calls":    0,
+        "total_cost":     selected_cost,
+        "by_model":       by_model,
+        "selected_date":  selected_date,
+        "latest_date":    latest_date,
+        "daily_history":  daily_history,
+        "month_input":    month_input,
+        "month_output":   month_output,
+        "month_cache_hit":month_cache_hit,
+        "month_calls":    0,
+        "month_cost":     month_cost,
     }
 
 
@@ -539,16 +606,21 @@ def _aggregate_usage(data_or_records):
         cost = float(r.get("cost") or r.get("cost_in_cents") or 0)
         model = r.get("model") or r.get("model_name") or "unknown"
 
+        calls = int(r.get("total_requests") or r.get("request_count") or
+                    r.get("api_calls") or r.get("count") or 0)
+        if calls <= 0:
+            calls = 1
+
         result["total_input"] += pin
         result["total_output"] += pout
-        result["total_calls"] += 1
+        result["total_calls"] += calls
         result["total_cost"] += cost
 
         if model not in result["by_model"]:
             result["by_model"][model] = {"input": 0, "output": 0, "cache_hit": 0, "calls": 0, "cost": 0.0}
         result["by_model"][model]["input"] += pin
         result["by_model"][model]["output"] += pout
-        result["by_model"][model]["calls"] += 1
+        result["by_model"][model]["calls"] += calls
         result["by_model"][model]["cost"] += cost
 
     total_tokens = result["total_input"] + result["total_output"]

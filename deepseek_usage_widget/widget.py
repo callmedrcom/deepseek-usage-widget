@@ -7,6 +7,7 @@ import sys
 import threading
 import os
 from datetime import datetime, date
+from pathlib import Path
 
 from .models import CONFIG_DIR, CONFIG_FILE, DEFAULT_CONFIG, THEME, MODEL_META, LOGO_FILE, CSV_CACHE_DIR, logger
 from .api_client import DeepSeekAPI, _aggregate_usage, _parse_csv_zip, _parse_deepseek_csv, _trim_cache
@@ -185,6 +186,7 @@ class DeepSeekWidget(tk.Tk):
 
         self.config = load_config()
         self.api = DeepSeekAPI(self.config)
+        self._compact_mode: bool = bool(self.config.get("compact_mode", False))
 
         # 数据状态
         self.balance_data = None
@@ -232,6 +234,9 @@ class DeepSeekWidget(tk.Tk):
         self._closing = False
         self._initial_fit_done = False
         self.refresh_interval_ms = self.config.get("refresh_interval", 60) * 1000
+        # ZIP 自动下载：None 表示从未下载过，首次刷新时立即尝试
+        self._last_zip_download: datetime | None = None
+        self._zip_download_interval_secs = 3600  # 每 60 分钟尝试一次
         self.after(500, self._schedule_refresh)
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -240,13 +245,19 @@ class DeepSeekWidget(tk.Tk):
     def _position_window(self):
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        ww = 940
-        wh = min(780, sh - 90)
-        wh = max(736, wh)
+        if getattr(self, "_compact_mode", False):
+            ww, wh = 390, 50
+        else:
+            ww = 940
+            wh = min(780, sh - 90)
+            wh = max(736, wh)
         self.geometry(f"{ww}x{wh}+{sw - ww - 20}+{sh - wh - 70}")
 
     def _fit_window_to_content(self):
         if self._closing:
+            return
+        if self._compact_mode:
+            self._fit_compact_window()
             return
         self.update_idletasks()
         sw = self.winfo_screenwidth()
@@ -273,20 +284,47 @@ class DeepSeekWidget(tk.Tk):
             y = sh - target_height - 70
         self.geometry(f"{width}x{target_height}+{x}+{max(10, y)}")
 
+    def _fit_compact_window(self):
+        if self._closing:
+            return
+        self.update_idletasks()
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        cx = self.winfo_x()
+        cy = self.winfo_y()
+        w = max(360, self._compact_shell.winfo_reqwidth() + 8)
+        h = max(44, self._compact_shell.winfo_reqheight() + 8)
+        if cx <= 0:
+            cx = sw - w - 20
+        if cy <= 0:
+            cy = sh - h - 70
+        x = max(0, min(cx, sw - w - 4))
+        y = max(0, min(cy, sh - h - 4))
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
     # ── UI 构建 ───────────────────────────────────────────
     def _build_ui(self):
-        shell = tk.Frame(self, bg=THEME["bg"])
-        shell.pack(fill="both", expand=True, padx=8, pady=8)
-
-        left_shell = self._panel_shell(shell)
+        # ── 主面板（完整模式）──
+        self._main_shell = tk.Frame(self, bg=THEME["bg"])
+        left_shell = self._panel_shell(self._main_shell)
         left_shell.pack(side="left", fill="both", expand=True, padx=(0, 4))
         self.left_panel = left_shell.body
-        right_shell = self._panel_shell(shell)
+        right_shell = self._panel_shell(self._main_shell)
         right_shell.pack(side="left", fill="both", expand=True, padx=(4, 0))
         self.right_panel = right_shell.body
 
         self._build_left_panel()
         self._build_right_panel()
+
+        # ── 紧凑面板（缩小模式）──
+        self._compact_shell = tk.Frame(self, bg=THEME["bg"])
+        self._build_compact_panel()
+
+        # 根据当前模式决定显示哪个
+        if self._compact_mode:
+            self._compact_shell.pack(fill="both", expand=True, padx=4, pady=4)
+        else:
+            self._main_shell.pack(fill="both", expand=True, padx=8, pady=8)
 
     def _build_left_panel(self):
         # ── 标题栏（Apple 风格：与面板同色，左品牌右操作）──
@@ -304,6 +342,7 @@ class DeepSeekWidget(tk.Tk):
                             bg=THEME["accent"], fg="#FFFFFF",
                             font=_font(11, bold=True), width=2, pady=2)
         logo.pack(side="left", padx=(0, 10))
+        brand._logo_ref = logo  # keep Python reference alive
 
         title_box = tk.Frame(brand, bg=THEME["panel"])
         title_box.pack(side="left")
@@ -319,6 +358,7 @@ class DeepSeekWidget(tk.Tk):
         action_items = [
             ("↻", self._schedule_refresh, "立即刷新", THEME["surface0"], THEME["dim"]),
             ("⚙", self._open_settings, "打开设置", THEME["surface0"], THEME["dim"]),
+            ("⊟", self._toggle_compact, "缩小", THEME["surface0"], THEME["dim"]),
             ("×", self._on_close, "关闭窗口", THEME["red"], "#FFFFFF"),
         ]
         self.action_buttons = []
@@ -406,6 +446,14 @@ class DeepSeekWidget(tk.Tk):
         tk.Label(toolbar, text="运行概览",
                  bg=THEME["panel"], fg=THEME["fg"],
                  font=_font(13, bold=True)).pack(side="left")
+        # 导入 ZIP 按钮（platform.deepseek.com/usage → 导出）
+        import_btn = tk.Button(toolbar, text="📂 导入 ZIP",
+                               bg=THEME["surface0"], fg=THEME["dim"],
+                               relief="flat", cursor="hand2", bd=0,
+                               font=_font(8),
+                               command=self._import_csv)
+        import_btn.pack(side="right", padx=(6, 0))
+        import_btn._skip_drag_binding = True
         tk.Label(toolbar, text="近 7 日",
                  bg=THEME["panel"], fg=THEME["dim"],
                  font=_font(9)).pack(side="right", anchor="s")
@@ -550,6 +598,162 @@ class DeepSeekWidget(tk.Tk):
                      bg=THEME["panel"], fg=THEME["muted"],
                      font=_font(8)).pack(side="left", padx=(4, 0))
 
+    # ── 紧凑悬浮条 ────────────────────────────────────────
+    def _build_compact_panel(self):
+        """构建缩小模式下的单行悬浮条：余额 | V4Flash | V4Pro"""
+        outer = tk.Frame(self._compact_shell, bg=THEME["panel_edge"], padx=1, pady=1)
+        outer.pack(fill="both", expand=True)
+        bar = tk.Frame(outer, bg=THEME["panel"])
+        bar.pack(fill="both", expand=True)
+
+        # 品牌标识
+        if self._brand_logo is not None:
+            logo = tk.Label(bar, image=self._brand_logo, bg=THEME["panel"], bd=0)
+        else:
+            logo = tk.Label(bar, text="◈",
+                            bg=THEME["accent"], fg="#FFFFFF",
+                            font=_font(9, bold=True), width=2, pady=2)
+        logo.pack(side="left", padx=(8, 6), pady=6)
+        bar._logo_ref = logo  # keep Python reference alive
+
+        # ── 余额区 ──
+        bal_box = tk.Frame(bar, bg=THEME["panel"])
+        bal_box.pack(side="left", padx=(0, 0))
+        tk.Label(bal_box, text="余额", bg=THEME["panel"], fg=THEME["dim"],
+                 font=_font(8)).pack(anchor="w")
+        self.cmp_balance = tk.Label(bal_box, text="--",
+                                    bg=THEME["panel"], fg=THEME["green"],
+                                    font=_font(11, bold=True))
+        self.cmp_balance.pack(anchor="w")
+
+        # 分隔线
+        tk.Frame(bar, bg=THEME["panel_edge"], width=1).pack(side="left", fill="y", padx=10, pady=6)
+
+        # ── V4Flash 区 ──
+        flash_box = tk.Frame(bar, bg=THEME["panel"])
+        flash_box.pack(side="left", padx=(0, 0))
+        flash_head = tk.Frame(flash_box, bg=THEME["panel"])
+        flash_head.pack(anchor="w")
+        tk.Label(flash_head, text="⚡", bg=THEME["panel"], fg="#8babff",
+                 font=_font(9)).pack(side="left")
+        tk.Label(flash_head, text="V4 Flash", bg=THEME["panel"], fg=THEME["dim"],
+                 font=_font(8)).pack(side="left", padx=(2, 0))
+        self.cmp_flash = tk.Label(flash_box, text="--",
+                                  bg=THEME["panel"], fg="#8babff",
+                                  font=_font(11, bold=True))
+        self.cmp_flash.pack(anchor="w")
+
+        # 分隔线
+        tk.Frame(bar, bg=THEME["panel_edge"], width=1).pack(side="left", fill="y", padx=10, pady=6)
+
+        # ── V4Pro 区 ──
+        pro_box = tk.Frame(bar, bg=THEME["panel"])
+        pro_box.pack(side="left", padx=(0, 0))
+        pro_head = tk.Frame(pro_box, bg=THEME["panel"])
+        pro_head.pack(anchor="w")
+        tk.Label(pro_head, text="✦", bg=THEME["panel"], fg="#c09aff",
+                 font=_font(9)).pack(side="left")
+        tk.Label(pro_head, text="V4 Pro", bg=THEME["panel"], fg=THEME["dim"],
+                 font=_font(8)).pack(side="left", padx=(2, 0))
+        self.cmp_pro = tk.Label(pro_box, text="--",
+                                bg=THEME["panel"], fg="#c09aff",
+                                font=_font(11, bold=True))
+        self.cmp_pro.pack(anchor="w")
+
+        # ── 右侧按钮 ──
+        btn_frame = tk.Frame(bar, bg=THEME["panel"])
+        btn_frame.pack(side="right", padx=(0, 6))
+
+        close_btn = tk.Button(btn_frame, text="×",
+                              command=self._on_close,
+                              bg=THEME["red"], fg="#FFFFFF",
+                              activebackground=THEME["surface1"],
+                              activeforeground=THEME["fg"],
+                              relief="flat", bd=0, cursor="hand2",
+                              font=_font(10, bold=True), width=2)
+        close_btn._skip_drag_binding = True
+        close_btn.pack(side="right", padx=(2, 0))
+
+        expand_btn = tk.Button(btn_frame, text="⊞",
+                               command=self._toggle_compact,
+                               bg=THEME["surface0"], fg=THEME["dim"],
+                               activebackground=THEME["surface1"],
+                               activeforeground=THEME["fg"],
+                               relief="flat", bd=0, cursor="hand2",
+                               font=_font(10, bold=True), width=2)
+        expand_btn._skip_drag_binding = True
+        expand_btn.pack(side="right", padx=(0, 2))
+
+    def _toggle_compact(self):
+        """切换紧凑 / 完整模式"""
+        self._compact_mode = not self._compact_mode
+        self.config["compact_mode"] = self._compact_mode
+        save_config(self.config)
+
+        # 更新右键菜单文字
+        try:
+            self._ctx_menu.entryconfigure(
+                self._ctx_compact_idx,
+                label="展开" if self._compact_mode else "缩小")
+        except Exception:
+            pass
+
+        if self._compact_mode:
+            self._main_shell.pack_forget()
+            self._compact_shell.pack(fill="both", expand=True, padx=4, pady=4)
+            self._update_compact_panel()
+            self.after_idle(self._fit_compact_window)
+        else:
+            self._compact_shell.pack_forget()
+            self._main_shell.pack(fill="both", expand=True, padx=8, pady=8)
+            self.after_idle(self._fit_window_to_content)
+
+    def _update_compact_panel(self):
+        """将当前数据刷新到紧凑面板标签"""
+        if not hasattr(self, "cmp_balance"):
+            return
+
+        # 余额
+        if self.balance_data:
+            blist = self.balance_data.get("balances", [])
+            if blist:
+                b = blist[0]
+                sym = "¥" if b.get("currency", "CNY") == "CNY" else "$"
+                total = float(b.get("total_balance", "0"))
+                self.cmp_balance.config(
+                    text=f"{sym}{total:,.2f}",
+                    fg=THEME["green"] if total > 0 else THEME["red"])
+            else:
+                self.cmp_balance.config(text="--", fg=THEME["dim"])
+        elif self.balance_error:
+            self.cmp_balance.config(text="Err", fg=THEME["red"])
+        else:
+            self.cmp_balance.config(text="--", fg=THEME["dim"])
+
+        # V4Flash（兼容旧 key）
+        flash = (self.by_model.get("deepseek-v4-flash") or
+                 self.by_model.get("deepseek-chat") or {})
+        self.cmp_flash.config(text=self._compact_model_text(flash))
+
+        # V4Pro
+        pro = (self.by_model.get("deepseek-v4-pro") or
+               self.by_model.get("deepseek-v3") or {})
+        self.cmp_pro.config(text=self._compact_model_text(pro))
+
+    def _compact_model_text(self, metrics: dict) -> str:
+        """为紧凑面板生成单行模型用量字符串"""
+        if not metrics:
+            return "--"
+        cost = metrics.get("cost", 0.0)
+        tokens = metrics.get("input", 0) + metrics.get("output", 0)
+        calls = metrics.get("calls", 0)
+        if cost > 0:
+            return f"¥{cost:.3f}"
+        if tokens > 0:
+            tok_str = self._format_axis_value(tokens)
+            return f"{tok_str}" + (f"  {calls}次" if calls else "")
+        return "--"
+
     def _build_history_table(self):
         headers = ["日期", "数据条", "调用", "费用"]
         self.history_table_header = tk.Frame(self.history_table, bg=THEME["surface0"])
@@ -644,6 +848,11 @@ class DeepSeekWidget(tk.Tk):
         self._ctx_menu.add_command(label="导入 CSV...", command=self._import_csv)
         self._ctx_menu.add_command(label="设置...", command=self._open_settings)
         self._ctx_menu.add_separator()
+        self._ctx_compact_idx = self._ctx_menu.index("end") + 1
+        self._ctx_menu.add_command(
+            label="展开" if self._compact_mode else "缩小",
+            command=self._toggle_compact)
+        self._ctx_menu.add_separator()
         self._ctx_menu.add_command(label="退出", command=self._on_close)
 
     def _context_menu(self, event):
@@ -723,6 +932,7 @@ class DeepSeekWidget(tk.Tk):
                 errors = []
 
                 if has_key:
+                    # ── 1. 直接用量 API（最快，但不含 token 明细）──
                     try:
                         raw = self.api.get_usage()
                         agg = _aggregate_usage(raw)
@@ -734,6 +944,28 @@ class DeepSeekWidget(tk.Tk):
                     except Exception as e:
                         errors.append(f"API: {_api_error_msg(e)}")
 
+                    # ── 2. ZIP 自动下载（完整数据：token+调用次数+费用）──
+                    # 首次或距上次下载超过 _zip_download_interval_secs 时触发
+                    _should_try_zip = (
+                        self._last_zip_download is None or
+                        (datetime.now() - self._last_zip_download).total_seconds()
+                        >= self._zip_download_interval_secs
+                    )
+                    if _should_try_zip:
+                        try:
+                            csv_result = self.api.get_usage_csv()
+                            if csv_result and (csv_result.get("total_calls", 0) > 0
+                                               or csv_result.get("total_cost", 0) > 0):
+                                self._last_zip_download = datetime.now()
+                                # ZIP 数据含精确 token 计数，覆盖之前的估算值
+                                usage_data = _build_snapshot(csv_result)
+                                got_usage = True
+                            else:
+                                errors.append("ZIP下载: 所有端点均不可达")
+                        except Exception as e:
+                            errors.append(f"ZIP下载: {_api_error_msg(e)}")
+
+                    # ── 3. 平台费用 API（有费用但 token 为估算值）──
                     if not got_usage:
                         try:
                             plat = self.api.get_platform_usage()
@@ -744,17 +976,6 @@ class DeepSeekWidget(tk.Tk):
                                 errors.append("平台API: 返回空数据")
                         except Exception as e:
                             errors.append(f"平台API: {_api_error_msg(e)}")
-
-                    if not got_usage:
-                        try:
-                            csv_result = self.api.get_usage_csv()
-                            if csv_result and (csv_result.get("total_calls", 0) > 0 or csv_result.get("total_cost", 0) > 0):
-                                usage_data = _build_snapshot(csv_result)
-                                got_usage = True
-                            else:
-                                errors.append("CSV下载: 所有端点均不可达")
-                        except Exception as e:
-                            errors.append(f"CSV下载: {_api_error_msg(e)}")
 
                 if not got_usage:
                     try:
@@ -936,6 +1157,9 @@ class DeepSeekWidget(tk.Tk):
         if not self._initial_fit_done:
             self._initial_fit_done = True
             self.after_idle(self._fit_window_to_content)
+
+        # 同步更新紧凑面板（无论当前是否可见）
+        self._update_compact_panel()
 
     def _render_model_cards(self):
         ranked = []
@@ -1150,16 +1374,43 @@ class DeepSeekWidget(tk.Tk):
                            fill=THEME["surface1"], width=2)
 
     def _load_brand_logo(self):
-        if not LOGO_FILE.exists():
+        # Search candidate paths: config dir → package parent dir → executable dir
+        candidates = [
+            LOGO_FILE,
+            Path(__file__).parent.parent / "logo.png",
+            Path(sys.executable).parent / "logo.png",
+        ]
+        logo_path = next((p for p in candidates if p.exists()), None)
+        logger.debug("_load_brand_logo: logo_path=%s", logo_path)
+        if logo_path is None:
+            logger.warning("_load_brand_logo: logo.png not found in any candidate path")
             return None
+
+        # Copy to canonical location for future runs
+        if logo_path != LOGO_FILE and not LOGO_FILE.exists():
+            try:
+                import shutil
+                CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(logo_path), str(LOGO_FILE))
+            except Exception:
+                pass
+
         try:
-            source = tk.PhotoImage(file=str(LOGO_FILE))
-            crop_width = min(source.width(), max(source.height(), 180))
-            icon = tk.PhotoImage()
-            icon.tk.call(str(icon), "copy", str(source), "-from", 0, 0, crop_width, source.height())
-            scale = max(1, round(source.height() / 24))
-            return icon.subsample(scale, scale)
-        except tk.TclError:
+            source = tk.PhotoImage(file=str(logo_path))
+            w, h = source.width(), source.height()
+            logger.debug("_load_brand_logo: loaded image %dx%d", w, h)
+            if h <= 0:
+                logger.warning("_load_brand_logo: image height is 0")
+                return None
+            scale = max(1, round(h / 24))
+            result = source.subsample(scale, scale) if scale > 1 else source
+            # Must keep source alive — if GC'd, Tcl deletes the image and display goes blank
+            self._brand_logo_source = source
+            self._brand_logo_result = result
+            logger.debug("_load_brand_logo: success, scale=%d, final size=%dx%d", scale, result.width(), result.height())
+            return result
+        except Exception as e:
+            logger.error("_load_brand_logo: failed to load %s — %s", logo_path, e)
             return None
 
     def _draw_rounded_bar(self, canvas, x0, y0, x1, y1, color, radius=6, stipple=None):
@@ -1200,8 +1451,8 @@ class DeepSeekWidget(tk.Tk):
         """手动导入 CSV/ZIP 文件，同时缓存到 CSV_CACHE_DIR"""
         from tkinter import filedialog
         path = filedialog.askopenfilename(
-            title="选择 DeepSeek 用量 CSV 或 ZIP 文件",
-            filetypes=[("CSV/ZIP files", "*.csv *.zip"), ("All files", "*.*")]
+            title="选择 DeepSeek 用量导出 ZIP（platform.deepseek.com/usage → 导出）",
+            filetypes=[("ZIP/CSV files", "*.zip *.csv"), ("All files", "*.*")]
         )
         if not path:
             return
@@ -1229,8 +1480,21 @@ class DeepSeekWidget(tk.Tk):
             self._apply_usage(agg)
             self.usage_error = None
             self.last_refresh = datetime.now()
+            # 手动导入即视为一次成功的 ZIP 获取，重置定时器
+            self._last_zip_download = datetime.now()
             self._full_render()
-            self._set_status(f"导入成功: {agg['selected_date'] or date.today().isoformat()}  {agg['total_calls']:,} 次调用", THEME["green"])
+
+            # 月度汇总提示
+            m_calls  = agg.get("month_calls", 0)
+            m_in     = agg.get("month_input", 0)
+            m_out    = agg.get("month_output", 0)
+            m_tokens = m_in + m_out
+            m_cost   = agg.get("month_cost", 0.0)
+            days_cnt = len(agg.get("daily_history", []))
+            tok_str  = f"{m_tokens/1_000_000:.2f}M" if m_tokens >= 1_000_000 else f"{m_tokens:,}"
+            self._set_status(
+                f"导入成功 {days_cnt}天  {m_calls:,}次请求  {tok_str} tokens  ¥{m_cost:.4f}",
+                THEME["green"])
         except Exception as e:
             self._set_status(f"导入失败: {e}", THEME["red"])
 
