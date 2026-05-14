@@ -59,7 +59,7 @@ build.bat
 Or run PyInstaller manually:
 
 ```powershell
-python -m PyInstaller --onefile --windowed --name DeepSeekWidget --hidden-import crypto_utils --paths "." run_widget.py
+python -m PyInstaller --onefile --windowed --name DeepSeekWidget --add-data "logo.png;." --hidden-import crypto_utils --paths "." run_widget.py
 ```
 
 ## Configuration

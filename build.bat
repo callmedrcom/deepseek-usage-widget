@@ -67,6 +67,7 @@ echo.
     --windowed ^
     --name DeepSeekWidget ^
     --clean ^
+    --add-data "%~dp0logo.png;." ^
     --hidden-import crypto_utils ^
     --paths "%~dp0" ^
     --distpath "%~dp0" ^

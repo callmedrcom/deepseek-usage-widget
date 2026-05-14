@@ -16,6 +16,25 @@ from .utils import _short_date, _chart_date, _load_local_zip, _api_error_msg
 
 _AF = None
 
+def _brand_logo_candidates():
+    candidates = [LOGO_FILE]
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "logo.png")
+    candidates.extend([
+        Path(__file__).resolve().parent.parent / "logo.png",
+        Path(sys.executable).parent / "logo.png",
+    ])
+    seen = set()
+    ordered = []
+    for path in candidates:
+        norm = str(path.resolve()) if path.exists() else str(path)
+        if norm in seen:
+            continue
+        seen.add(norm)
+        ordered.append(path)
+    return ordered
+
 def _available_fonts():
     return {f.lower() for f in tkfont.families()}
 
@@ -1374,12 +1393,8 @@ class DeepSeekWidget(tk.Tk):
                            fill=THEME["surface1"], width=2)
 
     def _load_brand_logo(self):
-        # Search candidate paths: config dir → package parent dir → executable dir
-        candidates = [
-            LOGO_FILE,
-            Path(__file__).parent.parent / "logo.png",
-            Path(sys.executable).parent / "logo.png",
-        ]
+        # Search candidate paths: config dir → PyInstaller temp dir → package root → executable dir
+        candidates = _brand_logo_candidates()
         logo_path = next((p for p in candidates if p.exists()), None)
         logger.debug("_load_brand_logo: logo_path=%s", logo_path)
         if logo_path is None:
