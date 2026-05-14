@@ -28,7 +28,10 @@ def _brand_logo_candidates():
     seen = set()
     ordered = []
     for path in candidates:
-        norm = str(path)
+        try:
+            norm = str(path.resolve(strict=False)).casefold()
+        except OSError:
+            norm = str(path).casefold()
         if norm in seen:
             continue
         seen.add(norm)

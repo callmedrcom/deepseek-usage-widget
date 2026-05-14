@@ -38,6 +38,13 @@ class TestLogoCandidatePaths(unittest.TestCase):
         candidates = self.widget._brand_logo_candidates()
         self.assertEqual(candidates[0], self.widget.LOGO_FILE)
 
+    def test_candidates_deduplicate_same_path(self):
+        package_root = str(Path(self.widget.__file__).resolve().parent.parent)
+        with patch.object(self.widget.sys, "_MEIPASS", package_root, create=True):
+            candidates = self.widget._brand_logo_candidates()
+        as_text = [str(path.resolve(strict=False)) for path in candidates]
+        self.assertEqual(len(as_text), len(set(as_text)))
+
 
 if __name__ == "__main__":
     unittest.main()
