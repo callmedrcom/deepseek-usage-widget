@@ -28,7 +28,10 @@ def _brand_logo_candidates():
     seen = set()
     ordered = []
     for path in candidates:
-        norm = str(path.resolve()) if path.exists() else str(path)
+        try:
+            norm = str(path.resolve()) if path.exists() else str(path)
+        except OSError:
+            norm = str(path)
         if norm in seen:
             continue
         seen.add(norm)
