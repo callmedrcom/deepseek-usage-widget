@@ -5,6 +5,7 @@ ENV/
 build/
 build_temp/
 dist/
+release/
 __pycache__/
 *.py[cod]
 *.pyo
