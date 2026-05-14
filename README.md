@@ -1,5 +1,7 @@
 # DeepSeek Usage Widget
 
+English | [简体中文](README.zh-CN.md)
+
 DeepSeek Usage Widget is a Windows desktop overlay built with Tkinter. It shows DeepSeek account balance, daily usage, token counts, request counts, and estimated cost in a compact always-on-top window.
 
 The app can read usage from the public DeepSeek API, the DeepSeek Platform usage endpoint, exported CSV/ZIP files, and locally cached ZIP files. It is designed for Windows desktop use and can be packaged into a standalone EXE with PyInstaller.
@@ -134,3 +136,7 @@ python test_deepseek_widget.py
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE).
+
+## Release Notes
+
+The initial public release notes are available in [RELEASE_NOTES_v0.1.0.md](RELEASE_NOTES_v0.1.0.md).
