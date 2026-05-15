@@ -325,14 +325,18 @@ class DeepSeekWidget(tk.Tk):
         self.update_idletasks()
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        # Prefer position saved before layout changes; fall back to current winfo
-        cx = self._pre_toggle_x if self._pre_toggle_x is not None else self.winfo_x()
-        cy = self._pre_toggle_y if self._pre_toggle_y is not None else self.winfo_y()
+        # Prefer position saved before layout changes; fall back to current winfo.
+        # The <= 0 default only applies to live winfo coordinates (unmapped window);
+        # a saved position of 0 is valid (top-left corner of the screen).
+        has_saved_x = self._pre_toggle_x is not None
+        has_saved_y = self._pre_toggle_y is not None
+        cx = self._pre_toggle_x if has_saved_x else self.winfo_x()
+        cy = self._pre_toggle_y if has_saved_y else self.winfo_y()
         w = max(360, self._compact_shell.winfo_reqwidth() + 8)
         h = max(44, self._compact_shell.winfo_reqheight() + 8)
-        if cx <= 0:
+        if not has_saved_x and cx <= 0:
             cx = sw - w - 20
-        if cy <= 0:
+        if not has_saved_y and cy <= 0:
             cy = sh - h - 70
         x = max(0, min(cx, sw - w - 4))
         y = max(0, min(cy, sh - h - 4))
