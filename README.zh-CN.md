@@ -142,6 +142,10 @@ python test_deepseek_widget.py
 - 正式发布前先本地打包一次 EXE
 - 首版发布说明见 [RELEASE_NOTES_v0.1.0.md](RELEASE_NOTES_v0.1.0.md)
 
+## 版本规划
+
+- 当前功能范围与后续版本计划见 [ROADMAP.md](ROADMAP.md)
+
 ## 许可证
 
 本项目采用 MIT License，详见 [LICENSE](LICENSE)。

@@ -133,6 +133,10 @@ python test_deepseek_widget.py
 - Build the EXE once before publishing a release.
 - Add a GitHub repository description and topics after the first push.
 
+## Roadmap
+
+- See [ROADMAP.md](ROADMAP.md) for the current scope and planned release direction.
+
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE).
