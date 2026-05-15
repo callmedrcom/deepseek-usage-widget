@@ -9,7 +9,7 @@ import os
 from datetime import datetime, date
 from pathlib import Path
 
-from .models import CONFIG_DIR, CONFIG_FILE, DEFAULT_CONFIG, THEME, MODEL_META, LOGO_FILE, CSV_CACHE_DIR, EVENT_LOG_FILE, logger
+from .models import CONFIG_DIR, CONFIG_FILE, DEFAULT_CONFIG, THEME, MODEL_META, LOGO_FILE, CSV_CACHE_DIR, SOURCE_LABELS, logger
 from .api_client import DeepSeekAPI, _aggregate_usage, _parse_csv_zip, _parse_deepseek_csv, _trim_cache
 from .config import load_config, save_config, load_daily_history, save_daily_history, merge_daily_history
 from .utils import _short_date, _chart_date, _load_local_zip, _api_error_msg
@@ -212,6 +212,162 @@ class SettingsWindow(tk.Toplevel):
             self.on_save_error(str(e))
         self.destroy()
 
+class FirstRunWindow(tk.Toplevel):
+    """首次运行引导 —— 帮助用户完成最小配置"""
+    def __init__(self, master, config, on_done, on_save_error):
+        super().__init__(master)
+        self.config = config
+        self.on_done = on_done
+        self.on_save_error = on_save_error
+        self.title("DeepSeek Monitor — 首次配置向导")
+        self.configure(bg=THEME["bg"])
+        self.resizable(False, False)
+        self.transient(master)
+
+        w, h = 520, 580
+        x = master.winfo_x() + (master.winfo_width() - w) // 2
+        y = master.winfo_y() + (master.winfo_height() - h) // 2
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
+        self._build_ui()
+        self.grab_set()
+        self.focus_force()
+
+    def _build_ui(self):
+        root = self.master
+
+        # 标题
+        header = tk.Frame(self, bg=THEME["accent"], padx=20, pady=16)
+        header.pack(fill="x")
+        tk.Label(header, text="欢迎使用 DeepSeek Monitor",
+                 bg=THEME["accent"], fg="#FFFFFF",
+                 font=_font(14, bold=True)).pack(anchor="w")
+        tk.Label(header, text="完成以下配置即可开始监测用量",
+                 bg=THEME["accent"], fg="#CCCCFF",
+                 font=_font(9)).pack(anchor="w", pady=(4, 0))
+
+        # 说明
+        guide = tk.Frame(self, bg=THEME["bg"], padx=20, pady=12)
+        guide.pack(fill="x")
+        lines = [
+            "此工具可以展示 DeepSeek 账户的余额、用量和消费趋势。",
+            "需要配置以下至少一项凭据才能获取数据：",
+        ]
+        for line in lines:
+            tk.Label(guide, text=line,
+                     bg=THEME["bg"], fg=THEME["fg"],
+                     font=_font(9), justify="left").pack(anchor="w")
+
+        # API Key 区域
+        self._section("1. API Key（必填，用于查询余额和 API 用量）")
+        tip1 = tk.Frame(self, bg=THEME["bg"])
+        tip1.pack(fill="x", padx=20, pady=(0, 2))
+        tk.Label(tip1, text="获取方式：访问 https://platform.deepseek.com/api_keys → 创建 API Key",
+                 bg=THEME["bg"], fg=THEME["dim"], font=_font(8)).pack(anchor="w")
+
+        key_frame = tk.Frame(self, bg=THEME["bg"])
+        key_frame.pack(fill="x", padx=20, pady=(0, 8))
+        self.key_var = tk.StringVar(master=root, value=self.config.get("api_key", ""))
+        self.key_entry = tk.Entry(key_frame, textvariable=self.key_var, show="*",
+                                  bg=THEME["card"], fg=THEME["fg"],
+                                  insertbackground=THEME["fg"],
+                                  font=_font(10, fixed=True), relief="flat", bd=8)
+        self.key_entry.pack(side="left", fill="x", expand=True)
+        self._show_key_btn = tk.Button(key_frame, text="显示", width=4,
+                                       bg=THEME["surface0"], fg=THEME["fg"],
+                                       relief="flat", cursor="hand2", bd=0,
+                                       font=_font(9),
+                                       command=self._toggle_key)
+        self._show_key_btn.pack(side="right", padx=(4, 0))
+
+        # Platform Token 区域
+        self._section("2. Platform Token（可选，用于拉取平台侧完整用量数据）")
+        tip2 = tk.Frame(self, bg=THEME["bg"])
+        tip2.pack(fill="x", padx=20, pady=(0, 2))
+        tk.Label(tip2, text="获取方式：浏览器打开 platform.deepseek.com/usage → F12 → Application →",
+                 bg=THEME["bg"], fg=THEME["dim"], font=_font(8)).pack(anchor="w")
+        tk.Label(tip2, text="            Local Storage → 复制 userToken 的值",
+                 bg=THEME["bg"], fg=THEME["dim"], font=_font(8)).pack(anchor="w")
+
+        pt_frame = tk.Frame(self, bg=THEME["bg"])
+        pt_frame.pack(fill="x", padx=20, pady=(0, 8))
+        self.pt_var = tk.StringVar(master=root, value=self.config.get("platform_token", ""))
+        self.pt_entry = tk.Entry(pt_frame, textvariable=self.pt_var, show="*",
+                                 bg=THEME["card"], fg=THEME["fg"],
+                                 insertbackground=THEME["fg"],
+                                 font=_font(10, fixed=True), relief="flat", bd=8)
+        self.pt_entry.pack(side="left", fill="x", expand=True)
+        self._show_pt_btn = tk.Button(pt_frame, text="显示", width=4,
+                                      bg=THEME["surface0"], fg=THEME["fg"],
+                                      relief="flat", cursor="hand2", bd=0,
+                                      font=_font(9),
+                                      command=self._toggle_pt)
+        self._show_pt_btn.pack(side="right", padx=(4, 0))
+
+        # 提示
+        hint = tk.Frame(self, bg=THEME["surface0"])
+        hint.pack(fill="x", padx=20, pady=(8, 12))
+        hint_text = "至少填写 API Key 即可开始使用。Platform Token 可提供更完整的平台侧用量数据。\n两者都可在后续通过「设置」面板随时修改。"
+        tk.Label(hint, text=hint_text,
+                 bg=THEME["surface0"], fg=THEME["dim"],
+                 font=_font(8), justify="left",
+                 padx=10, pady=8).pack(fill="x")
+
+        # 按钮
+        btn_frame = tk.Frame(self, bg=THEME["bg"])
+        btn_frame.pack(fill="x", padx=20, pady=(0, 16))
+        tk.Button(btn_frame, text="开始使用", command=self._save,
+                  bg=THEME["accent"], fg="#ffffff", relief="flat",
+                  font=_font(12, bold=True), cursor="hand2",
+                  padx=32, pady=8, bd=0, activebackground=THEME["accent"]
+                  ).pack(side="right", padx=6)
+        tk.Button(btn_frame, text="稍后配置", command=self._skip,
+                  bg=THEME["surface0"], fg=THEME["dim"], relief="flat",
+                  font=_font(10), cursor="hand2",
+                  padx=20, pady=8, bd=0, activebackground=THEME["dim"]
+                  ).pack(side="right", padx=6)
+
+    def _section(self, text):
+        tk.Label(self, text=text, bg=THEME["bg"], fg=THEME["accent"],
+                 font=_font(10, bold=True)
+                 ).pack(anchor="w", padx=20, pady=(10, 2))
+
+    def _toggle_key(self):
+        if self.key_entry.cget("show") == "*":
+            self.key_entry.configure(show="")
+            self._show_key_btn.configure(text="隐藏")
+        else:
+            self.key_entry.configure(show="*")
+            self._show_key_btn.configure(text="显示")
+
+    def _toggle_pt(self):
+        if self.pt_entry.cget("show") == "*":
+            self.pt_entry.configure(show="")
+            self._show_pt_btn.configure(text="隐藏")
+        else:
+            self.pt_entry.configure(show="*")
+            self._show_pt_btn.configure(text="显示")
+
+    def _save(self):
+        self.config["api_key"] = self.key_var.get().strip()
+        self.config["platform_token"] = self.pt_var.get().strip()
+        try:
+            save_config(self.config)
+            self.on_done()
+        except Exception as e:
+            self.on_save_error(str(e))
+        self.destroy()
+
+    def _skip(self):
+        self.config["api_key"] = self.key_var.get().strip()
+        self.config["platform_token"] = self.pt_var.get().strip()
+        if self.config["api_key"] or self.config["platform_token"]:
+            try:
+                save_config(self.config)
+            except Exception:
+                logger.warning("首次引导保存配置失败", exc_info=True)
+        self.destroy()
+
 class DeepSeekWidget(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -228,6 +384,8 @@ class DeepSeekWidget(tk.Tk):
         self.usage_data = None       # 聚合后的用量
         self.usage_error = None
         self.last_refresh = None
+        self.active_source = None    # 当前数据来源标识
+        self.active_source_label = None  # 数据来源中文标签
 
         # 今日用量
         self.today_input = 0
@@ -265,6 +423,7 @@ class DeepSeekWidget(tk.Tk):
         self._refresh_lock = threading.Lock()
         self._refresh_job_id = None
         self._settings_window = None
+        self._first_run_window = None
         self._closing = False
         self._initial_fit_done = False
         self.refresh_interval_ms = self.config.get("refresh_interval", 60) * 1000
@@ -272,6 +431,10 @@ class DeepSeekWidget(tk.Tk):
         self._last_zip_download: datetime | None = None
         self._zip_download_interval_secs = 3600  # 每 60 分钟尝试一次
         self.after(500, self._schedule_refresh)
+
+        # 首次运行引导
+        if not self.config.get("api_key") and not self.config.get("platform_token"):
+            self.after(800, self._show_first_run_guide)
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -945,35 +1108,6 @@ class DeepSeekWidget(tk.Tk):
     def _do_refresh(self):
         has_key = bool(self.config.get("api_key"))
 
-        def _build_snapshot(agg):
-            tin = agg["total_input"]
-            tout = agg["total_output"]
-            tcalls = agg["total_calls"]
-            tcost = agg["total_cost"]
-            by_model = agg.get("by_model", {})
-            sel_date = agg.get("selected_date") or date.today().isoformat()
-            mcost = agg.get("month_cost", tcost)
-            mcalls = agg.get("month_calls", tcalls)
-            mtokens = agg.get("month_input", tin) + agg.get("month_output", tout)
-            cache_history = load_daily_history()
-            merged_history = merge_daily_history(cache_history, agg.get("daily_history", []))
-            if sel_date:
-                merged_history = merge_daily_history(merged_history, [{
-                    "date": sel_date,
-                    "tokens": tin + tout,
-                    "cost": tcost,
-                    "calls": tcalls,
-                }])
-            save_daily_history({item["date"]: item for item in merged_history})
-            return {
-                "today_input": tin, "today_output": tout,
-                "today_calls": tcalls, "today_cost": tcost,
-                "by_model": by_model, "selected_date": sel_date,
-                "month_cost": mcost, "month_calls": mcalls,
-                "month_tokens": mtokens, "daily_history": merged_history,
-                "total_tokens": tin + tout,
-            }
-
         def fetch():
             snapshot = {}
             with self._refresh_lock:
@@ -990,7 +1124,9 @@ class DeepSeekWidget(tk.Tk):
                 usage_error = None
                 usage_data = None
                 got_usage = False
-                errors = []
+                active_source = None
+                active_source_label = None
+                errors = []  # list of {"source": str, "error": str, "action": str}
 
                 if has_key:
                     # ── 1. 直接用量 API（最快，但不含 token 明细）──
@@ -998,14 +1134,22 @@ class DeepSeekWidget(tk.Tk):
                         raw = self.api.get_usage()
                         agg = _aggregate_usage(raw)
                         if agg["total_calls"] > 0 or agg["total_cost"] > 0:
-                            usage_data = _build_snapshot(agg)
+                            usage_data = self._process_aggregation(agg)
                             got_usage = True
+                            active_source = "api"
+                            active_source_label = SOURCE_LABELS["api"]
                         else:
-                            errors.append("API返回空数据")
-                            _log_event("API返回空数据 (get_usage)")
+                            errors.append({
+                                "source": "API用量接口",
+                                "error": "返回空数据",
+                                "action": "请确认账户存在用量记录",
+                            })
                     except Exception as e:
-                        errors.append(f"API: {_api_error_msg(e)}")
-                        _log_event(f"API请求失败: {_api_error_msg(e)}")
+                        errors.append({
+                            "source": "API用量接口",
+                            "error": _api_error_msg(e),
+                            "action": "请检查 API Key 是否有效",
+                        })
 
                     # ── 2. ZIP 自动下载（完整数据：token+调用次数+费用）──
                     # 首次或距上次下载超过 _zip_download_interval_secs 时触发
@@ -1021,46 +1165,77 @@ class DeepSeekWidget(tk.Tk):
                                                or csv_result.get("total_cost", 0) > 0):
                                 self._last_zip_download = datetime.now()
                                 # ZIP 数据含精确 token 计数，覆盖之前的估算值
-                                usage_data = _build_snapshot(csv_result)
+                                usage_data = self._process_aggregation(csv_result)
                                 got_usage = True
+                                active_source = "zip_download"
+                                active_source_label = SOURCE_LABELS["zip_download"]
                             else:
-                                errors.append("ZIP下载: 所有端点均不可达")
-                                _log_event("ZIP下载: 所有端点均不可达")
+                                errors.append({
+                                    "source": SOURCE_LABELS["zip_download"],
+                                    "error": "所有下载端点均不可达",
+                                    "action": "请检查 Platform Token 是否有效，或在网页端手动下载导入",
+                                })
                         except Exception as e:
-                            errors.append(f"ZIP下载: {_api_error_msg(e)}")
-                            _log_event(f"ZIP下载失败: {_api_error_msg(e)}")
+                            errors.append({
+                                "source": SOURCE_LABELS["zip_download"],
+                                "error": _api_error_msg(e),
+                                "action": "请检查 Platform Token 是否过期",
+                            })
 
                     # ── 3. 平台费用 API（有费用但 token 为估算值）──
                     if not got_usage:
                         try:
                             plat = self.api.get_platform_usage()
                             if plat and (plat.get("total_calls", 0) > 0 or plat.get("total_cost", 0) > 0):
-                                usage_data = _build_snapshot(plat)
+                                usage_data = self._process_aggregation(plat)
                                 got_usage = True
+                                active_source = "platform_api"
+                                active_source_label = SOURCE_LABELS["platform_api"]
                             else:
-                                errors.append("平台API: 返回空数据")
-                                _log_event("平台API: 返回空数据")
+                                errors.append({
+                                    "source": SOURCE_LABELS["platform_api"],
+                                    "error": "返回空数据",
+                                    "action": "请确认平台账户存在消费记录",
+                                })
                         except Exception as e:
-                            errors.append(f"平台API: {_api_error_msg(e)}")
-                            _log_event(f"平台API请求失败: {_api_error_msg(e)}")
+                            errors.append({
+                                "source": SOURCE_LABELS["platform_api"],
+                                "error": _api_error_msg(e),
+                                "action": "请检查 Platform Token 是否正确",
+                            })
 
                 if not got_usage:
                     try:
                         local_result = _load_local_zip()
                         if local_result and (local_result.get("total_calls", 0) > 0 or local_result.get("total_cost", 0) > 0):
-                            usage_data = _build_snapshot(local_result)
+                            usage_data = self._process_aggregation(local_result)
                             got_usage = True
+                            active_source = "local_zip"
+                            active_source_label = SOURCE_LABELS["local_zip"]
                     except Exception as e:
-                        errors.append(f"本地ZIP: {e}")
+                        errors.append({
+                            "source": "本地ZIP",
+                            "error": str(e),
+                            "action": "请检查程序目录下的 ZIP 文件是否损坏",
+                        })
 
                 if not got_usage:
                     if not has_key:
-                        usage_error = "请设置 API Key，或将用量 ZIP 放入程序目录"
+                        usage_error = "请设置 API Key 或 Platform Token 后开始获取数据"
                     else:
-                        usage_error = " | ".join(errors) if errors else "暂无用量数据"
+                        # 构建可读的多源错误信息
+                        if errors:
+                            parts = []
+                            for err in errors:
+                                parts.append(f"{err['source']}失败: {err['error']}（{err['action']}）")
+                            usage_error = "\n".join(parts)
+                        else:
+                            usage_error = "暂无用量数据，请检查网络连接后重试"
 
                 snapshot["usage_data"] = usage_data
                 snapshot["usage_error"] = usage_error
+                snapshot["active_source"] = active_source
+                snapshot["active_source_label"] = active_source_label
                 snapshot["last_refresh"] = datetime.now()
 
                 now = datetime.now()
@@ -1078,6 +1253,8 @@ class DeepSeekWidget(tk.Tk):
         self.balance_data = snapshot.get("balance_data")
         self.balance_error = snapshot.get("balance_error")
         self.usage_error = snapshot.get("usage_error")
+        self.active_source = snapshot.get("active_source")
+        self.active_source_label = snapshot.get("active_source_label")
         self.last_refresh = snapshot.get("last_refresh")
         self._current_tpm = snapshot.get("tpm", 0)
 
@@ -1095,7 +1272,8 @@ class DeepSeekWidget(tk.Tk):
             self.daily_history = usage.get("daily_history", [])
         self._full_render()
 
-    def _apply_usage(self, agg):
+    def _process_aggregation(self, agg):
+        """将聚合数据合并到本地历史并返回快照字典。同时更新实例属性。"""
         tin = agg["total_input"]
         tout = agg["total_output"]
         tcalls = agg["total_calls"]
@@ -1126,6 +1304,15 @@ class DeepSeekWidget(tk.Tk):
         self.month_calls = mcalls
         self.month_tokens = mtokens
         self.daily_history = merged_history
+
+        return {
+            "today_input": tin, "today_output": tout,
+            "today_calls": tcalls, "today_cost": tcost,
+            "by_model": by_model, "selected_date": sel_date,
+            "month_cost": mcost, "month_calls": mcalls,
+            "month_tokens": mtokens, "daily_history": merged_history,
+            "total_tokens": tin + tout,
+        }
 
     # ── UI 渲染 ───────────────────────────────────────────
     def _full_render(self):
@@ -1210,6 +1397,8 @@ class DeepSeekWidget(tk.Tk):
 
         # ── 状态栏 ──
         parts = []
+        if self.active_source_label:
+            parts.append(f"[{self.active_source_label}]")
         if self.last_refresh:
             parts.append(f"刷新于 {self.last_refresh.strftime('%H:%M:%S')}")
         if self.usage_error:
@@ -1456,7 +1645,7 @@ class DeepSeekWidget(tk.Tk):
                 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(str(logo_path), str(LOGO_FILE))
             except Exception:
-                pass
+                logger.warning("无法将 Logo 复制到缓存目录", exc_info=True)
 
         try:
             source = tk.PhotoImage(file=str(logo_path))
@@ -1512,6 +1701,15 @@ class DeepSeekWidget(tk.Tk):
     # ── CSV 导入 ──────────────────────────────────────────
     def _import_csv(self):
         """手动导入 CSV/ZIP 文件，同时缓存到 CSV_CACHE_DIR"""
+        if not self._refresh_lock.acquire(blocking=False):
+            self._set_status("刷新进行中，请稍后再试", THEME["dim"])
+            return
+        try:
+            self._import_csv_locked()
+        finally:
+            self._refresh_lock.release()
+
+    def _import_csv_locked(self):
         from tkinter import filedialog
         path = filedialog.askopenfilename(
             title="选择 DeepSeek 用量导出 ZIP（platform.deepseek.com/usage → 导出）",
@@ -1540,8 +1738,10 @@ class DeepSeekWidget(tk.Tk):
                 with open(path, "r", encoding="utf-8-sig") as f:
                     agg = _parse_deepseek_csv(f.read(), "")
 
-            self._apply_usage(agg)
+            self._process_aggregation(agg)
             self.usage_error = None
+            self.active_source = "import"
+            self.active_source_label = "手动导入文件"
             self.last_refresh = datetime.now()
             # 手动导入即视为一次成功的 ZIP 获取，重置定时器
             self._last_zip_download = datetime.now()
@@ -1587,6 +1787,32 @@ class DeepSeekWidget(tk.Tk):
         self._settings_window = None
         self._set_status(f"保存失败: {err_msg}", THEME["red"])
 
+    def _show_first_run_guide(self):
+        if self._closing:
+            return
+        if self._first_run_window is not None and self._first_run_window.winfo_exists():
+            self._first_run_window.lift()
+            self._first_run_window.focus_force()
+            return
+        self._first_run_window = FirstRunWindow(self, self.config,
+                                                self._on_first_run_done,
+                                                self._on_first_run_save_error)
+
+    def _on_first_run_done(self):
+        self._first_run_window = None
+        self.config = load_config()
+        self.api.update_key(self.config["api_key"])
+        self.api.update_platform_token(self.config.get("platform_token", ""))
+        self.refresh_interval_ms = self.config.get("refresh_interval", 60) * 1000
+        if self._refresh_job_id:
+            self.after_cancel(self._refresh_job_id)
+        self._schedule_refresh()
+        self._set_status("配置完成，正在获取数据...", THEME["green"])
+
+    def _on_first_run_save_error(self, err_msg):
+        self._first_run_window = None
+        self._set_status(f"配置保存失败: {err_msg}", THEME["red"])
+
     # ── 退出 ──────────────────────────────────────────────
     def _on_close(self):
         if self._closing:
@@ -1605,6 +1831,11 @@ class DeepSeekWidget(tk.Tk):
         if self._settings_window is not None and self._settings_window.winfo_exists():
             try:
                 self._settings_window.destroy()
+            except tk.TclError:
+                pass
+        if self._first_run_window is not None and self._first_run_window.winfo_exists():
+            try:
+                self._first_run_window.destroy()
             except tk.TclError:
                 pass
         self.withdraw()
