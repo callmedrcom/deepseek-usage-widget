@@ -140,17 +140,19 @@ class TestFitCompactWindow(unittest.TestCase):
     # -- saved position is used -----------------------------------------------
 
     def test_uses_saved_position_when_set(self):
-        """Compact window should land at the pre-toggle coordinates."""
+        """Compact window anchors to bottom-right corner of pre-toggle window."""
+        # Full window at (100, 300) 940×736 → right=1040, bottom=1036
+        # Compact w=388 h=44 → x=1040-388=652, y=1036-44=992
         mock = _make_mock_widget(
-            win_x=500, win_y=200,               # stale / wrong winfo values
-            pre_toggle_x=100, pre_toggle_y=50,  # true saved position
+            win_x=500, win_y=200,                 # stale winfo (must not be used)
+            pre_toggle_x=1040, pre_toggle_y=1036, # saved bottom-right corner
             compact_mode=True,
         )
         self._call(mock)
         mock.geometry.assert_called_once()
         _, _, x, y = _parse_geometry(mock.geometry.call_args[0][0])
-        self.assertEqual(x, 100)
-        self.assertEqual(y, 50)
+        self.assertEqual(x, 652)
+        self.assertEqual(y, 992)
 
     def test_falls_back_to_winfo_when_no_saved_position(self):
         """Without saved position, winfo_x/y values should be used."""
@@ -242,13 +244,16 @@ class TestFitWindowToContent(unittest.TestCase):
     # -- saved position is used -----------------------------------------------
 
     def test_uses_saved_position_when_expanding(self):
-        """Expanded window restores the pre-toggle x/y."""
-        mock = self._make_expand_mock(pre_toggle_x=300, pre_toggle_y=150)
+        """Expanded window anchors to bottom-right corner of compact window."""
+        # Compact at (100, 200) 100×100 → right=200, bottom=300 — but those
+        # give a negative derived x after expand.  Use coords that resolve cleanly:
+        # saved right=1040, bottom=1036 → expand 940×680 → x=100, y=330.
+        mock = self._make_expand_mock(pre_toggle_x=1040, pre_toggle_y=1036)
         self._call(mock)
         mock.geometry.assert_called_once()
         _, _, x, y = _parse_geometry(mock.geometry.call_args[0][0])
-        self.assertEqual(x, 300)
-        self.assertEqual(y, max(10, 150))
+        self.assertEqual(x, 100)
+        self.assertEqual(y, 330)
 
     def test_saved_position_zero_is_valid_on_expand(self):
         """x=0 (top-left) must be preserved when expanding."""
@@ -329,6 +334,8 @@ class TestToggleCompactSavesPosition(unittest.TestCase):
 
         m.winfo_x.side_effect = track_winfo_x
         m.winfo_y.side_effect = track_winfo_y
+        m.winfo_width.return_value = 940
+        m.winfo_height.return_value = 736
 
         def track_pack_forget():
             m._call_order.append("pack_forget")
@@ -362,20 +369,22 @@ class TestToggleCompactSavesPosition(unittest.TestCase):
                         "winfo_x must be called before pack_forget")
 
     def test_toggle_compact_saves_correct_coordinates(self):
-        """Coordinates reported by winfo_x/y must appear in _pre_toggle_x/y."""
+        """Bottom-right corner saved as _pre_toggle_x/y."""
         mock = self._make_toggle_mock(compact_mode=False)
         with patch("deepseek_usage_widget.widget.save_config"):
             self.wm.DeepSeekWidget._toggle_compact(mock)
-        self.assertEqual(mock._pre_toggle_x, 350)
-        self.assertEqual(mock._pre_toggle_y, 120)
+        # winfo_x=350 + winfo_width=940 → right edge 1290
+        self.assertEqual(mock._pre_toggle_x, 1290)
+        # winfo_y=120 + winfo_height=736 → bottom edge 856
+        self.assertEqual(mock._pre_toggle_y, 856)
 
     def test_toggle_expand_saves_correct_coordinates(self):
-        """Expanding (compact→full) also saves position."""
+        """Expanding (compact→full) also saves bottom-right corner."""
         mock = self._make_toggle_mock(compact_mode=True)
         with patch("deepseek_usage_widget.widget.save_config"):
             self.wm.DeepSeekWidget._toggle_compact(mock)
-        self.assertEqual(mock._pre_toggle_x, 350)
-        self.assertEqual(mock._pre_toggle_y, 120)
+        self.assertEqual(mock._pre_toggle_x, 1290)
+        self.assertEqual(mock._pre_toggle_y, 856)
 
 
 if __name__ == "__main__":

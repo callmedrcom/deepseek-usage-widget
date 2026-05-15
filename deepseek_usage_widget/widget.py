@@ -9,7 +9,7 @@ import os
 from datetime import datetime, date
 from pathlib import Path
 
-from .models import CONFIG_DIR, CONFIG_FILE, DEFAULT_CONFIG, THEME, MODEL_META, LOGO_FILE, CSV_CACHE_DIR, logger
+from .models import CONFIG_DIR, CONFIG_FILE, DEFAULT_CONFIG, THEME, MODEL_META, LOGO_FILE, CSV_CACHE_DIR, EVENT_LOG_FILE, logger
 from .api_client import DeepSeekAPI, _aggregate_usage, _parse_csv_zip, _parse_deepseek_csv, _trim_cache
 from .config import load_config, save_config, load_daily_history, save_daily_history, merge_daily_history
 from .utils import _short_date, _chart_date, _load_local_zip, _api_error_msg
@@ -54,6 +54,16 @@ def _font(size=10, bold=False, fixed=False):
         if name.lower() in _AF:
             return (name, size, weight)
     return ("TkDefaultFont", size, weight)
+
+def _log_event(message):
+    """Append a timestamped message to the event log file."""
+    try:
+        EVENT_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(EVENT_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] {message}\n")
+    except Exception:
+        pass
 
 class SettingsWindow(tk.Toplevel):
     def __init__(self, master, config, on_save, on_save_error):
@@ -284,6 +294,8 @@ class DeepSeekWidget(tk.Tk):
             self._fit_compact_window()
             return
         # Consume saved toggle position up front so early returns can't leak it.
+        # The saved values are the window's bottom-right corner before toggle;
+        # derive the new top-left by subtracting expanded dimensions.
         origin_x = self._pre_toggle_x
         origin_y = self._pre_toggle_y
         self._pre_toggle_x = None
@@ -304,13 +316,13 @@ class DeepSeekWidget(tk.Tk):
         if abs(target_height - current_height) < 2 and abs(width - current_width) < 2:
             return
         if origin_x is not None:
-            x = max(0, min(origin_x, sw - width - 20))
+            x = max(0, min(origin_x - width, sw - width - 20))
         elif current_x > 0:
             x = max(0, min(current_x - max(0, width - current_width), sw - width - 20))
         else:
             x = sw - width - 20
         if origin_y is not None:
-            y = min(origin_y, sh - target_height - 70)
+            y = min(origin_y - target_height, sh - target_height - 70)
         elif current_y > 0:
             y = min(current_y - max(0, target_height - current_height), sh - target_height - 70)
         else:
@@ -325,15 +337,14 @@ class DeepSeekWidget(tk.Tk):
         self.update_idletasks()
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        # Prefer position saved before layout changes; fall back to current winfo.
-        # The <= 0 default only applies to live winfo coordinates (unmapped window);
-        # a saved position of 0 is valid (top-left corner of the screen).
+        # Saved position is the window's bottom-right corner before toggle.
+        # Derive top-left by subtracting compact dimensions from that anchor.
         has_saved_x = self._pre_toggle_x is not None
         has_saved_y = self._pre_toggle_y is not None
-        cx = self._pre_toggle_x if has_saved_x else self.winfo_x()
-        cy = self._pre_toggle_y if has_saved_y else self.winfo_y()
         w = max(360, self._compact_shell.winfo_reqwidth() + 8)
         h = max(44, self._compact_shell.winfo_reqheight() + 8)
+        cx = (self._pre_toggle_x - w) if has_saved_x else self.winfo_x()
+        cy = (self._pre_toggle_y - h) if has_saved_y else self.winfo_y()
         if not has_saved_x and cx <= 0:
             cx = sw - w - 20
         if not has_saved_y and cy <= 0:
@@ -341,7 +352,6 @@ class DeepSeekWidget(tk.Tk):
         x = max(0, min(cx, sw - w - 4))
         y = max(0, min(cy, sh - h - 4))
         self.geometry(f"{w}x{h}+{x}+{y}")
-        # Clear saved toggle position so subsequent auto-resizes use live coords
         self._pre_toggle_x = None
         self._pre_toggle_y = None
 
@@ -729,10 +739,10 @@ class DeepSeekWidget(tk.Tk):
 
     def _toggle_compact(self):
         """切换紧凑 / 完整模式"""
-        # Save current position before any layout changes so fit functions can
-        # restore it accurately even if the window manager repositions the window.
-        self._pre_toggle_x = self.winfo_x()
-        self._pre_toggle_y = self.winfo_y()
+        # Save bottom-right corner before layout changes so the window
+        # shrinks/expands around that anchor (right edge, bottom edge stay put).
+        self._pre_toggle_x = self.winfo_x() + self.winfo_width()
+        self._pre_toggle_y = self.winfo_y() + self.winfo_height()
 
         self._compact_mode = not self._compact_mode
         self.config["compact_mode"] = self._compact_mode
@@ -992,8 +1002,10 @@ class DeepSeekWidget(tk.Tk):
                             got_usage = True
                         else:
                             errors.append("API返回空数据")
+                            _log_event("API返回空数据 (get_usage)")
                     except Exception as e:
                         errors.append(f"API: {_api_error_msg(e)}")
+                        _log_event(f"API请求失败: {_api_error_msg(e)}")
 
                     # ── 2. ZIP 自动下载（完整数据：token+调用次数+费用）──
                     # 首次或距上次下载超过 _zip_download_interval_secs 时触发
@@ -1013,8 +1025,10 @@ class DeepSeekWidget(tk.Tk):
                                 got_usage = True
                             else:
                                 errors.append("ZIP下载: 所有端点均不可达")
+                                _log_event("ZIP下载: 所有端点均不可达")
                         except Exception as e:
                             errors.append(f"ZIP下载: {_api_error_msg(e)}")
+                            _log_event(f"ZIP下载失败: {_api_error_msg(e)}")
 
                     # ── 3. 平台费用 API（有费用但 token 为估算值）──
                     if not got_usage:
@@ -1025,8 +1039,10 @@ class DeepSeekWidget(tk.Tk):
                                 got_usage = True
                             else:
                                 errors.append("平台API: 返回空数据")
+                                _log_event("平台API: 返回空数据")
                         except Exception as e:
                             errors.append(f"平台API: {_api_error_msg(e)}")
+                            _log_event(f"平台API请求失败: {_api_error_msg(e)}")
 
                 if not got_usage:
                     try:
