@@ -75,6 +75,17 @@ MODEL_META = {
     "deepseek-r1": {"label": "R1", "accent": "#ffbf8a", "badge": "推理"},
 }
 
+# ── 数据源标识（v0.1.1）─────────────────────────────────────────
+SOURCE_LABELS = {
+    "api": "API 用量接口",
+    "zip_download": "平台数据导出",
+    "platform_api": "平台费用接口（Token 为估算值）",
+    "local_zip": "本地 ZIP 文件",
+    "import": "手动导入文件",
+}
+
+FALLBACK_ORDER = ["api", "zip_download", "platform_api", "local_zip"]
+
 # ── 字体 ────────────────────────────────────────────────────
 import tkinter.font as tkfont
 _AF = None
