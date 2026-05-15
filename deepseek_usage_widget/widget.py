@@ -209,6 +209,8 @@ class DeepSeekWidget(tk.Tk):
         self.config = load_config()
         self.api = DeepSeekAPI(self.config)
         self._compact_mode: bool = bool(self.config.get("compact_mode", False))
+        self._pre_toggle_x: int | None = None
+        self._pre_toggle_y: int | None = None
 
         # 数据状态
         self.balance_data = None
@@ -298,15 +300,15 @@ class DeepSeekWidget(tk.Tk):
             return
         # When expanding from compact mode, restore to pre-toggle position;
         # otherwise keep the window's current anchor, expanding around it.
-        origin_x = getattr(self, "_pre_toggle_x", 0)
-        origin_y = getattr(self, "_pre_toggle_y", 0)
-        if origin_x > 0:
+        origin_x = self._pre_toggle_x
+        origin_y = self._pre_toggle_y
+        if origin_x is not None:
             x = max(0, min(origin_x, sw - width - 4))
         elif current_x > 0:
             x = max(0, min(current_x - max(0, width - current_width), sw - width - 20))
         else:
             x = sw - width - 20
-        if origin_y > 0:
+        if origin_y is not None:
             y = max(10, min(origin_y, sh - target_height - 4))
         elif current_y > 0:
             y = max(10, min(current_y - max(0, target_height - current_height), sh - target_height - 70))
@@ -314,8 +316,8 @@ class DeepSeekWidget(tk.Tk):
             y = sh - target_height - 70
         self.geometry(f"{width}x{target_height}+{x}+{max(10, y)}")
         # Clear saved toggle position so subsequent auto-resizes use live coords
-        self._pre_toggle_x = 0
-        self._pre_toggle_y = 0
+        self._pre_toggle_x = None
+        self._pre_toggle_y = None
 
     def _fit_compact_window(self):
         if self._closing:
@@ -324,8 +326,8 @@ class DeepSeekWidget(tk.Tk):
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
         # Prefer position saved before layout changes; fall back to current winfo
-        cx = getattr(self, "_pre_toggle_x", 0) or self.winfo_x()
-        cy = getattr(self, "_pre_toggle_y", 0) or self.winfo_y()
+        cx = self._pre_toggle_x if self._pre_toggle_x is not None else self.winfo_x()
+        cy = self._pre_toggle_y if self._pre_toggle_y is not None else self.winfo_y()
         w = max(360, self._compact_shell.winfo_reqwidth() + 8)
         h = max(44, self._compact_shell.winfo_reqheight() + 8)
         if cx <= 0:
@@ -336,8 +338,8 @@ class DeepSeekWidget(tk.Tk):
         y = max(0, min(cy, sh - h - 4))
         self.geometry(f"{w}x{h}+{x}+{y}")
         # Clear saved toggle position so subsequent auto-resizes use live coords
-        self._pre_toggle_x = 0
-        self._pre_toggle_y = 0
+        self._pre_toggle_x = None
+        self._pre_toggle_y = None
 
     # ── UI 构建 ───────────────────────────────────────────
     def _build_ui(self):
