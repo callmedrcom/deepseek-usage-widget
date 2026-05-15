@@ -283,6 +283,11 @@ class DeepSeekWidget(tk.Tk):
         if self._compact_mode:
             self._fit_compact_window()
             return
+        # Consume saved toggle position up front so early returns can't leak it.
+        origin_x = self._pre_toggle_x
+        origin_y = self._pre_toggle_y
+        self._pre_toggle_x = None
+        self._pre_toggle_y = None
         self.update_idletasks()
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
@@ -298,29 +303,24 @@ class DeepSeekWidget(tk.Tk):
             return
         if abs(target_height - current_height) < 2 and abs(width - current_width) < 2:
             return
-        # When expanding from compact mode, restore to pre-toggle position;
-        # otherwise keep the window's current anchor, expanding around it.
-        origin_x = self._pre_toggle_x
-        origin_y = self._pre_toggle_y
         if origin_x is not None:
-            x = max(0, min(origin_x, sw - width - 4))
+            x = max(0, min(origin_x, sw - width - 20))
         elif current_x > 0:
             x = max(0, min(current_x - max(0, width - current_width), sw - width - 20))
         else:
             x = sw - width - 20
         if origin_y is not None:
-            y = max(10, min(origin_y, sh - target_height - 4))
+            y = min(origin_y, sh - target_height - 70)
         elif current_y > 0:
-            y = max(10, min(current_y - max(0, target_height - current_height), sh - target_height - 70))
+            y = min(current_y - max(0, target_height - current_height), sh - target_height - 70)
         else:
             y = sh - target_height - 70
         self.geometry(f"{width}x{target_height}+{x}+{max(10, y)}")
-        # Clear saved toggle position so subsequent auto-resizes use live coords
-        self._pre_toggle_x = None
-        self._pre_toggle_y = None
 
     def _fit_compact_window(self):
         if self._closing:
+            return
+        if not self._compact_mode:
             return
         self.update_idletasks()
         sw = self.winfo_screenwidth()
@@ -736,15 +736,6 @@ class DeepSeekWidget(tk.Tk):
 
         self._compact_mode = not self._compact_mode
         self.config["compact_mode"] = self._compact_mode
-        save_config(self.config)
-
-        # 更新右键菜单文字
-        try:
-            self._ctx_menu.entryconfigure(
-                self._ctx_compact_idx,
-                label="展开" if self._compact_mode else "缩小")
-        except Exception:
-            pass
 
         if self._compact_mode:
             self._main_shell.pack_forget()
@@ -755,6 +746,18 @@ class DeepSeekWidget(tk.Tk):
             self._compact_shell.pack_forget()
             self._main_shell.pack(fill="both", expand=True, padx=8, pady=8)
             self.after_idle(self._fit_window_to_content)
+
+        try:
+            save_config(self.config)
+        except Exception:
+            logger.warning("failed to persist config after toggle", exc_info=True)
+
+        try:
+            self._ctx_menu.entryconfigure(
+                self._ctx_compact_idx,
+                label="展开" if self._compact_mode else "缩小")
+        except Exception:
+            logger.debug("failed to update context menu label after toggle", exc_info=True)
 
     def _update_compact_panel(self):
         """将当前数据刷新到紧凑面板标签"""

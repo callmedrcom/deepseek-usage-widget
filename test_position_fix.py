@@ -144,6 +144,7 @@ class TestFitCompactWindow(unittest.TestCase):
         mock = _make_mock_widget(
             win_x=500, win_y=200,               # stale / wrong winfo values
             pre_toggle_x=100, pre_toggle_y=50,  # true saved position
+            compact_mode=True,
         )
         self._call(mock)
         mock.geometry.assert_called_once()
@@ -154,7 +155,8 @@ class TestFitCompactWindow(unittest.TestCase):
     def test_falls_back_to_winfo_when_no_saved_position(self):
         """Without saved position, winfo_x/y values should be used."""
         mock = _make_mock_widget(win_x=700, win_y=400,
-                                 pre_toggle_x=None, pre_toggle_y=None)
+                                 pre_toggle_x=None, pre_toggle_y=None,
+                                 compact_mode=True)
         self._call(mock)
         mock.geometry.assert_called_once()
         _, _, x, y = _parse_geometry(mock.geometry.call_args[0][0])
@@ -170,6 +172,7 @@ class TestFitCompactWindow(unittest.TestCase):
             pre_toggle_x=0, pre_toggle_y=0,
             screen_w=1920, screen_h=1080,
             compact_req_w=352, compact_req_h=36,
+            compact_mode=True,
         )
         self._call(mock)
         _, _, x, y = _parse_geometry(mock.geometry.call_args[0][0])
@@ -179,13 +182,13 @@ class TestFitCompactWindow(unittest.TestCase):
     # -- saved position is cleared --------------------------------------------
 
     def test_clears_saved_position_after_call(self):
-        mock = _make_mock_widget(pre_toggle_x=100, pre_toggle_y=50)
+        mock = _make_mock_widget(pre_toggle_x=100, pre_toggle_y=50, compact_mode=True)
         self._call(mock)
         self.assertIsNone(mock._pre_toggle_x)
         self.assertIsNone(mock._pre_toggle_y)
 
     def test_clears_saved_position_when_it_was_none(self):
-        mock = _make_mock_widget(pre_toggle_x=None, pre_toggle_y=None)
+        mock = _make_mock_widget(pre_toggle_x=None, pre_toggle_y=None, compact_mode=True)
         self._call(mock)
         self.assertIsNone(mock._pre_toggle_x)
         self.assertIsNone(mock._pre_toggle_y)
@@ -205,6 +208,7 @@ class TestFitCompactWindow(unittest.TestCase):
             screen_w=1920, screen_h=1080,
             pre_toggle_x=1900, pre_toggle_y=1060,
             compact_req_w=352, compact_req_h=36,
+            compact_mode=True,
         )
         self._call(mock)
         w, h, x, y = _parse_geometry(mock.geometry.call_args[0][0])
